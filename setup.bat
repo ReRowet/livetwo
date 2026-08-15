@@ -5,7 +5,7 @@ title RE Stream - Windows Setup Installer
 color 0B
 
 echo ==============================================================================
-echo              RE Stream — Live Streaming Server (Windows Setup)
+echo              RE Stream -- Live Streaming Server (Windows Setup)
 echo ==============================================================================
 echo.
 
@@ -15,44 +15,37 @@ echo.
 echo [1/5] Memeriksa instalasi Node.js...
 
 where node >nul 2>nul
-if %errorlevel% neq 0 (
-    echo [INFO] Node.js tidak ditemukan di sistem Anda.
-    echo Mengunduh dan menginstall Node.js v20 LTS otomatis...
-    echo.
-    
-    set "NODE_MSI=node_installer.msi"
-    set "NODE_URL=https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi"
-    
-    echo Men-download Node.js LTS dari nodejs.org...
-    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; try { (New-Object Net.WebClient).DownloadFile('%NODE_URL%', '%NODE_MSI%'); Write-Host '[OK] Download selesai.' } catch { Write-Host '[ERROR] Gagal download:' $_.Exception.Message; exit 1 }"
-    
-    if not exist "%NODE_MSI%" (
-        color 0C
-        echo [ERROR] Gagal mengunduh installer Node.js.
-        echo Silakan unduh manual di https://nodejs.org/
-        pause
-        exit /b 1
-    )
-    
-    echo Menginstall Node.js (harap tunggu hingga installer selesai)...
-    msiexec /i "%NODE_MSI%" /passive /norestart
-    
-    :: Clean up installer file
-    if exist "%NODE_MSI%" del /f /q "%NODE_MSI%"
-    
-    :: Refresh Environment PATH for current session
-    set "PATH=%PATH%;C:\Program Files\nodejs;%APPDATA%\npm;C:\Program Files (x86)\nodejs"
-    for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul') do set "PATH=!PATH!;%%b"
-    for /f "tokens=2*" %%a in ('reg query "HKCU\Environment" /v Path 2^>nul') do set "PATH=!PATH!;%%b"
-    
-    where node >nul 2>nul
-    if %errorlevel% neq 0 (
-        color 0E
-        echo [INFO] Instalasi Node.js selesai. Jika perintah npm belum terbaca,
-        echo silakan tutup jendela CMD ini dan jalankan kembali setup.bat.
-    )
-)
+if %errorlevel% equ 0 goto :node_is_installed
 
+echo [INFO] Node.js tidak ditemukan di sistem Anda.
+echo Mengunduh dan menginstall Node.js v20 LTS otomatis...
+echo.
+
+set "NODE_MSI=node_installer.msi"
+set "NODE_URL=https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi"
+
+echo Men-download Node.js LTS dari nodejs.org...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object Net.WebClient).DownloadFile('%NODE_URL%', '%NODE_MSI%')"
+
+if not exist "%NODE_MSI%" goto :node_download_failed
+
+echo Menginstall Node.js (harap tunggu hingga selesai)...
+msiexec /i "%NODE_MSI%" /passive /norestart
+if exist "%NODE_MSI%" del /f /q "%NODE_MSI%"
+
+:: Refresh PATH
+set "PATH=%PATH%;C:\Program Files\nodejs;%APPDATA%\npm;C:\Program Files (x86)\nodejs"
+goto :check_node_version
+
+:node_download_failed
+color 0C
+echo [ERROR] Gagal mengunduh installer Node.js.
+echo Silakan unduh dan pasang manual di https://nodejs.org/
+pause
+exit /b 1
+
+:node_is_installed
+:check_node_version
 for /f "tokens=*" %%v in ('node -v 2^>nul') do set NODE_VER=%%v
 if defined NODE_VER (
     echo [OK] Node.js terdeteksi: %NODE_VER%
@@ -67,28 +60,24 @@ echo.
 echo [2/5] Memeriksa FFmpeg...
 if not exist "bin" mkdir "bin"
 
-set FFMPEG_OK=0
+if exist "bin\ffmpeg.exe" goto :ffmpeg_is_ready
 where ffmpeg >nul 2>nul
-if %errorlevel% equ 0 set FFMPEG_OK=1
-if exist "bin\ffmpeg.exe" set FFMPEG_OK=1
+if %errorlevel% equ 0 goto :ffmpeg_is_ready
 
-if %FFMPEG_OK% equ 0 (
-    echo [INFO] FFmpeg tidak ditemukan. Mengunduh FFmpeg Windows otomatis ke folder bin...
-    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $zip = 'ffmpeg_temp.zip'; Write-Host 'Downloading FFmpeg...'; try { (New-Object Net.WebClient).DownloadFile('https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', $zip); Expand-Archive -Path $zip -DestinationPath 'ffmpeg_extracted' -Force; Get-ChildItem -Path 'ffmpeg_extracted' -Recurse -Filter 'ffmpeg.exe' | Copy-Item -Destination 'bin\ffmpeg.exe' -Force; Get-ChildItem -Path 'ffmpeg_extracted' -Recurse -Filter 'ffprobe.exe' | Copy-Item -Destination 'bin\ffprobe.exe' -Force; Remove-Item -Recurse -Force 'ffmpeg_extracted', $zip; Write-Host '[OK] FFmpeg berhasil dipasang di folder bin\' } catch { Write-Host '[WARNING] Auto-download FFmpeg gagal, Anda dapat meletakkan ffmpeg.exe di folder bin secara manual.' }"
-)
+echo [INFO] FFmpeg tidak ditemukan. Mengunduh FFmpeg Windows ke folder bin...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $zip = 'ffmpeg_temp.zip'; try { (New-Object Net.WebClient).DownloadFile('https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', $zip); Expand-Archive -Path $zip -DestinationPath 'ffmpeg_extracted' -Force; Get-ChildItem -Path 'ffmpeg_extracted' -Recurse -Filter 'ffmpeg.exe' | Copy-Item -Destination 'bin\ffmpeg.exe' -Force; Get-ChildItem -Path 'ffmpeg_extracted' -Recurse -Filter 'ffprobe.exe' | Copy-Item -Destination 'bin\ffprobe.exe' -Force; Remove-Item -Recurse -Force 'ffmpeg_extracted', $zip; Write-Host '[OK] FFmpeg berhasil dipasang di folder bin\' } catch { Write-Host '[WARNING] Download FFmpeg otomatis dilewati.' }"
 
+:ffmpeg_is_ready
 if exist "bin\ffmpeg.exe" (
     echo [OK] FFmpeg siap di bin\ffmpeg.exe
 ) else (
-    where ffmpeg >nul 2>nul
-    if %errorlevel% equ 0 (
-        for /f "tokens=*" %%f in ('ffmpeg -version 2^>nul') do (
-            echo [OK] %%f
-            goto :ffmpeg_done
-        )
+    for /f "tokens=*" %%f in ('ffmpeg -version 2^>nul') do (
+        echo [OK] %%f
+        goto :ffmpeg_step_done
     )
+    echo [INFO] FFmpeg siap digunakan.
 )
-:ffmpeg_done
+:ffmpeg_step_done
 echo.
 
 :: -----------------------------------------------------------------------------
@@ -109,23 +98,25 @@ echo.
 :: 4. Setup .env
 :: -----------------------------------------------------------------------------
 echo [4/5] Menyiapkan file konfigurasi .env...
-if not exist ".env" (
-    if exist ".env.example" (
-        copy ".env.example" ".env" >nul
-        echo [OK] Berhasil membuat .env dari template .env.example
-    ) else (
-        (
-            echo AUTH_USERNAME=admin
-            echo AUTH_PASSWORD=admin123
-            echo JWT_SECRET=re_stream_jwt_secret_token_2026_super_secure
-            echo JWT_REFRESH_SECRET=re_stream_jwt_refresh_secret_2026_super_secure
-            echo PORT=3002
-        ) > ".env"
-        echo [OK] Berhasil membuat file .env baru
-    )
-) else (
-    echo [OK] File .env sudah ada.
+if exist ".env" goto :env_exists
+if exist ".env.example" (
+    copy ".env.example" ".env" >nul
+    echo [OK] Berhasil membuat .env dari template .env.example
+    goto :env_done
 )
+
+(
+    echo AUTH_USERNAME=admin
+    echo AUTH_PASSWORD=admin123
+    echo JWT_SECRET=re_stream_jwt_secret_token_2026_super_secure
+    echo JWT_REFRESH_SECRET=re_stream_jwt_refresh_secret_2026_super_secure
+    echo PORT=3002
+) > ".env"
+echo [OK] Berhasil membuat file .env baru
+
+:env_exists
+echo [OK] File .env sudah ada.
+:env_done
 echo.
 
 :: -----------------------------------------------------------------------------
