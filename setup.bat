@@ -9,44 +9,91 @@ echo              RE Stream — Live Streaming Server (Windows Setup)
 echo ==============================================================================
 echo.
 
-:: 1. Check Node.js
+:: -----------------------------------------------------------------------------
+:: 1. Check & Auto-Download Node.js
+:: -----------------------------------------------------------------------------
 echo [1/5] Memeriksa instalasi Node.js...
+
 where node >nul 2>nul
 if %errorlevel% neq 0 (
-    color 0C
-    echo [ERROR] Node.js tidak ditemukan!
-    echo Silakan unduh dan install Node.js (LTS) dari https://nodejs.org/
-    echo Setelah selesai menginstall, buka kembali file ini.
+    echo [INFO] Node.js tidak ditemukan di sistem Anda.
+    echo Mengunduh dan menginstall Node.js v20 LTS otomatis...
     echo.
-    pause
-    exit /b 1
+    
+    set "NODE_MSI=node_installer.msi"
+    set "NODE_URL=https://nodejs.org/dist/v20.18.0/node-v20.18.0-x64.msi"
+    
+    echo Men-download Node.js LTS dari nodejs.org...
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; try { (New-Object Net.WebClient).DownloadFile('%NODE_URL%', '%NODE_MSI%'); Write-Host '[OK] Download selesai.' } catch { Write-Host '[ERROR] Gagal download:' $_.Exception.Message; exit 1 }"
+    
+    if not exist "%NODE_MSI%" (
+        color 0C
+        echo [ERROR] Gagal mengunduh installer Node.js.
+        echo Silakan unduh manual di https://nodejs.org/
+        pause
+        exit /b 1
+    )
+    
+    echo Menginstall Node.js (harap tunggu hingga installer selesai)...
+    msiexec /i "%NODE_MSI%" /passive /norestart
+    
+    :: Clean up installer file
+    if exist "%NODE_MSI%" del /f /q "%NODE_MSI%"
+    
+    :: Refresh Environment PATH for current session
+    set "PATH=%PATH%;C:\Program Files\nodejs;%APPDATA%\npm;C:\Program Files (x86)\nodejs"
+    for /f "tokens=2*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul') do set "PATH=!PATH!;%%b"
+    for /f "tokens=2*" %%a in ('reg query "HKCU\Environment" /v Path 2^>nul') do set "PATH=!PATH!;%%b"
+    
+    where node >nul 2>nul
+    if %errorlevel% neq 0 (
+        color 0E
+        echo [INFO] Instalasi Node.js selesai. Jika perintah npm belum terbaca,
+        echo silakan tutup jendela CMD ini dan jalankan kembali setup.bat.
+    )
 )
 
-for /f "tokens=*" %%v in ('node -v') do set NODE_VER=%%v
-echo [OK] Node.js terdeteksi: %NODE_VER%
-echo.
-
-:: 2. Check FFmpeg
-echo [2/5] Memeriksa FFmpeg...
-where ffmpeg >nul 2>nul
-if %errorlevel% neq 0 (
-    if exist "bin\ffmpeg.exe" (
-        echo [OK] FFmpeg ditemukan di folder lokal: bin\ffmpeg.exe
-    ) else (
-        echo [WARNING] FFmpeg tidak ditemukan di sistem PATH maupun di bin\ffmpeg.exe
-        echo Pastikan FFmpeg sudah terpasang di Windows PATH atau letakkan ffmpeg.exe di folder 'bin\'.
-    )
+for /f "tokens=*" %%v in ('node -v 2^>nul') do set NODE_VER=%%v
+if defined NODE_VER (
+    echo [OK] Node.js terdeteksi: %NODE_VER%
 ) else (
-    for /f "tokens=*" %%f in ('ffmpeg -version 2^>nul') do (
-        set FFMPEG_VER=%%f
-        goto :ffmpeg_found
-    )
+    echo [OK] Node.js telah dipasang.
 )
-:ffmpeg_found
-if defined FFMPEG_VER echo [OK] %FFMPEG_VER%
 echo.
 
+:: -----------------------------------------------------------------------------
+:: 2. Check & Auto-Download FFmpeg (if not in PATH or bin)
+:: -----------------------------------------------------------------------------
+echo [2/5] Memeriksa FFmpeg...
+if not exist "bin" mkdir "bin"
+
+set FFMPEG_OK=0
+where ffmpeg >nul 2>nul
+if %errorlevel% equ 0 set FFMPEG_OK=1
+if exist "bin\ffmpeg.exe" set FFMPEG_OK=1
+
+if %FFMPEG_OK% equ 0 (
+    echo [INFO] FFmpeg tidak ditemukan. Mengunduh FFmpeg Windows otomatis ke folder bin...
+    powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $zip = 'ffmpeg_temp.zip'; Write-Host 'Downloading FFmpeg...'; try { (New-Object Net.WebClient).DownloadFile('https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', $zip); Expand-Archive -Path $zip -DestinationPath 'ffmpeg_extracted' -Force; Get-ChildItem -Path 'ffmpeg_extracted' -Recurse -Filter 'ffmpeg.exe' | Copy-Item -Destination 'bin\ffmpeg.exe' -Force; Get-ChildItem -Path 'ffmpeg_extracted' -Recurse -Filter 'ffprobe.exe' | Copy-Item -Destination 'bin\ffprobe.exe' -Force; Remove-Item -Recurse -Force 'ffmpeg_extracted', $zip; Write-Host '[OK] FFmpeg berhasil dipasang di folder bin\' } catch { Write-Host '[WARNING] Auto-download FFmpeg gagal, Anda dapat meletakkan ffmpeg.exe di folder bin secara manual.' }"
+)
+
+if exist "bin\ffmpeg.exe" (
+    echo [OK] FFmpeg siap di bin\ffmpeg.exe
+) else (
+    where ffmpeg >nul 2>nul
+    if %errorlevel% equ 0 (
+        for /f "tokens=*" %%f in ('ffmpeg -version 2^>nul') do (
+            echo [OK] %%f
+            goto :ffmpeg_done
+        )
+    )
+)
+:ffmpeg_done
+echo.
+
+:: -----------------------------------------------------------------------------
 :: 3. Create Required Folders
+:: -----------------------------------------------------------------------------
 echo [3/5] Menyiapkan struktur folder...
 if not exist "data" mkdir "data"
 if not exist "logs" mkdir "logs"
@@ -58,7 +105,9 @@ if not exist "bin" mkdir "bin"
 echo [OK] Folder data, logs, playlists, uploads, dan bin siap.
 echo.
 
+:: -----------------------------------------------------------------------------
 :: 4. Setup .env
+:: -----------------------------------------------------------------------------
 echo [4/5] Menyiapkan file konfigurasi .env...
 if not exist ".env" (
     if exist ".env.example" (
@@ -79,7 +128,9 @@ if not exist ".env" (
 )
 echo.
 
-:: 5. Install Dependencies
+:: -----------------------------------------------------------------------------
+:: 5. Install Dependencies (npm install)
+:: -----------------------------------------------------------------------------
 echo [5/5] Menginstall dependensi (npm install)...
 call npm install --no-audit --fund=false
 if %errorlevel% neq 0 (
@@ -98,7 +149,7 @@ echo ===========================================================================
 echo.
 echo Untuk menjalankan server:
 echo  1. Jalankan langsung dengan start.bat (atau 'npm start')
-echo  2. Atau dengan PM2: 'npm run pm2:start'
+echo  2. Atau dengan PM2: 'npm run pm2:start' (atau double-click pm2-manage.bat)
 echo.
 echo Akses Web Dashboard di: http://localhost:3002
 echo Default Login: admin / admin123
