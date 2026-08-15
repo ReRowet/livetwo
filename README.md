@@ -5,21 +5,45 @@ RE Stream is a modern web-based stream manager powered by Node.js, Express, FFmp
 ## ✨ Features
 - 🚀 **Multi-Channel & Multi-Stream Manager**: Schedule, organize, and stream to YouTube, Facebook, Twitch, and custom RTMP endpoints.
 - 🔁 **Continuous 24/7 Streaming**: Concat demuxer with auto-reconnect, 1-hour loop options, playlist shuffling, and live status broadcasting via SSE.
-- ⚡ **PM2 & Linux Optimized**: Cross-platform path normalizer, background process lifecycle, memory management, and auto-start on server boot.
-- 📁 **Automated Setup Script**: 1-step installation script (`setup.sh`) for Ubuntu/Debian/CentOS Linux servers.
+- ⚡ **PM2 & Cross-Platform Optimized**: Works seamlessly on Linux VPS and Windows with cross-platform path normalizers and background process lifecycle management.
+- 📁 **Automated 1-Click Installers**: 
+  - Linux VPS: `setup.sh`
+  - Windows: `setup.bat`, `start.bat`, and `pm2-manage.bat`
 - 📊 **Real-time System Metrics**: Live CPU, RAM, Disk, Network I/O monitoring.
+
+---
 
 ## 🚀 Quick Start (Linux VPS)
 
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/ReRowet/livetwo.git
 cd livetwo
 
-# Run automated installer
+# 2. Run automated installer
 chmod +x setup.sh
 ./setup.sh
 ```
+
+---
+
+## 💻 Quick Start (Windows)
+
+### Option 1: 1-Click Setup / Run (Batch Files)
+- **Instalasi & Setup**: Double-click [`setup.bat`](setup.bat)
+- **Jalankan Langsung**: Double-click [`start.bat`](start.bat) *(otomatis membuka browser ke http://localhost:3002)*
+- **Menu Manajemen PM2 di Windows**: Double-click [`pm2-manage.bat`](pm2-manage.bat)
+
+### Option 2: Command Line (CMD / PowerShell)
+```cmd
+# Install dependencies
+npm install
+
+# Start server
+npm start
+```
+
+---
 
 ## 🛠 Manual Management (PM2)
 
@@ -39,6 +63,8 @@ npm run pm2:restart
 # Stop server
 npm run pm2:stop
 ```
+
+---
 
 ## 🔒 Configuration (`.env`)
 
