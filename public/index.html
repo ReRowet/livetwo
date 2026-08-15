@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RE Stream</title>
+  <link rel="icon" type="image/png" href="https://license.v2.rowet.xyz/logo.png">
+  <meta name="description" content="RE Stream — Automated Live Streaming & Channel Management">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css?v=5.8.0">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <!-- ============================================================ -->
+  <!-- LOGIN VIEW: Card Design Matching RE Stream Dashboard -->
+  <!-- ============================================================ -->
+  <div id="loginView" class="login-wrapper">
+    <div class="login-background-glow"></div>
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-brand-logo-wrap">
+          <img src="https://license.v2.rowet.xyz/logo.png" alt="RE Stream Logo" class="login-brand-logo">
+        </div>
+        <h1 class="login-title">RE Stream</h1>
+        <p class="login-subtitle">Live Streaming & Channel Automation Platform</p>
+      </div>
+
+      <div id="loginAlert" class="login-alert" style="display: none;">
+        <i data-lucide="alert-circle" style="width: 16px; height: 16px; flex-shrink: 0;"></i>
+        <span id="loginAlertMsg">Invalid username or password</span>
+      </div>
+
+      <form id="loginForm" onsubmit="App.handleLogin(event)">
+        <div class="form-group margin-bottom-md">
+          <label for="loginUsername">Username</label>
+          <div class="login-input-wrapper">
+            <i data-lucide="user" class="login-input-icon"></i>
+            <input type="text" id="loginUsername" placeholder="Enter your username" required autocomplete="username" value="admin">
+          </div>
+        </div>
+
+        <div class="form-group margin-bottom-lg">
+          <label for="loginPassword">Password</label>
+          <div class="login-input-wrapper">
+            <i data-lucide="lock" class="login-input-icon"></i>
+            <input type="password" id="loginPassword" placeholder="Enter your password" required autocomplete="current-password" value="admin123">
+            <button type="button" class="login-pwd-toggle" onclick="App.togglePasswordVisibility()">
+              <i data-lucide="eye" id="loginPwdEye" style="width: 16px; height: 16px;"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="login-remember-row margin-bottom-lg">
+          <label class="custom-checkbox-label">
+            <input type="checkbox" id="loginRememberMe" checked>
+            <span class="custom-checkbox-box"></span>
+            <span>Remember session (Stay logged in)</span>
+          </label>
+        </div>
+
+        <button type="submit" class="btn btn-purple-gradient login-submit-btn" id="loginSubmitBtn">
+          <span id="loginBtnText">Sign In to RE Stream</span>
+          <i data-lucide="arrow-right" id="loginBtnIcon" style="width: 16px; height: 16px;"></i>
+        </button>
+      </form>
+
+      <div class="login-footer">
+        <div class="login-security-badge">
+          <i data-lucide="shield-check" style="width: 14px; height: 14px; color: #10b981;"></i>
+          <span>Secured with JWT Session & Refresh Tokens</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-container" id="appContainer" style="display: none;">
+    <!-- Top Header Navigation -->
+    <header class="top-nav">
+      <div class="nav-brand">
+        <img src="https://license.v2.rowet.xyz/logo.png" alt="RE Stream" class="brand-logo-img" style="height: 32px; width: auto; object-fit: contain;">
+        <span class="brand-name">RE Stream</span>
+      </div>
+      <div class="nav-right-cluster">
+        <nav class="nav-links">
+          <button class="nav-btn active" id="navBtnStreams" onclick="App.switchNav('streams')">Streams</button>
+          <button class="nav-btn" id="navBtnChannels" onclick="App.switchNav('channels')">Channels</button>
+        </nav>
+        <div class="nav-user-badge" onclick="App.openCredentialsModal()" title="Click to change credentials" style="cursor: pointer;">
+          <div class="user-avatar-circle">
+            <i data-lucide="user" style="width: 13px; height: 13px;"></i>
+          </div>
+          <span id="navUsername">admin</span>
+          <i data-lucide="settings" style="width: 12px; height: 12px; color: #94a3b8; margin-left: 2px;"></i>
+        </div>
+        <button class="nav-logout-btn" onclick="App.logout()" title="Log out session">
+          <i data-lucide="log-out" style="width: 14px; height: 14px;"></i>
+          <span>Logout</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ============================================================ -->
+    <!-- VIEW 1: STREAMS DASHBOARD -->
+    <!-- ============================================================ -->
+    <main id="viewStreams" class="page-view active">
+      <header class="page-header">
+        <h1 class="page-title">Streams</h1>
+      </header>
+
+      <!-- Stats Bar (4 Cards) -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-label">TOTAL CHANNELS</span>
+          <span class="stat-value" id="statChannels">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">TOTAL STREAMS</span>
+          <span class="stat-value" id="statTotalStreams">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">LIVE STREAMS</span>
+          <span class="stat-value text-live" id="statLiveStreams">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">SCHEDULED</span>
+          <span class="stat-value" id="statScheduled">0</span>
+        </div>
+      </div>
+
+      <!-- Filter Bar & New Stream Action -->
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <!-- Custom Searchable Filter by Channel Dropdown -->
+          <div class="custom-filter-wrapper" style="position: relative;">
+            <input type="hidden" id="filterChannel" value="">
+            <div class="custom-filter-trigger" id="toolbarChannelFilterTrigger" onclick="App.toggleToolbarChannelFilter(event)">
+              <i data-lucide="filter" style="width: 14px; height: 14px; color: #94a3b8;"></i>
+              <span id="toolbarChannelFilterLabel">Filter by Channel</span>
+              <i data-lucide="chevron-down" id="toolbarChannelFilterChevron" style="width: 14px; height: 14px; color: #94a3b8; transition: transform 0.2s ease;"></i>
+            </div>
+
+            <!-- Dropdown Menu -->
+            <div class="custom-filter-dropdown" id="toolbarChannelFilterDropdown" style="display: none;">
+              <div class="custom-select-search-box">
+                <i data-lucide="search" style="width: 14px; height: 14px; color: #64748b; margin-right: 8px; flex-shrink: 0;"></i>
+                <input type="text" id="toolbarChannelSearchInput" placeholder="Search channels..." oninput="App.filterToolbarChannelDropdown(this.value)" onclick="event.stopPropagation()">
+              </div>
+              <div class="custom-filter-list" id="toolbarChannelFilterList">
+                <!-- Rendered via JS -->
+              </div>
+            </div>
+          </div>
+          <div class="select-wrapper">
+            <select id="filterStatus" onchange="App.applyFilters()">
+              <option value="">All Status</option>
+              <option value="live">Live</option>
+              <option value="idle">Idle</option>
+              <option value="retrying">Retrying</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+          <div class="search-wrapper">
+            <i data-lucide="search" class="search-icon lucide-icon"></i>
+            <input type="text" id="searchInput" placeholder="Search streams..." oninput="App.applyFilters()">
+          </div>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-purple" onclick="App.openAddModal()">
+            <i data-lucide="plus" class="lucide-icon" style="width:16px;height:16px;"></i> New Stream
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Table Container -->
+      <div class="table-card">
+        <table class="streams-table">
+          <thead>
+            <tr>
+              <th>STREAM NAME</th>
+              <th>TYPE</th>
+              <th>PLATFORM</th>
+              <th>DURATION</th>
+              <th>STATUS</th>
+              <th>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody id="streamTableBody">
+            <tr>
+              <td colspan="6" class="empty-cell">
+                <div class="empty-state">
+                  <p>No streams found. Click "+ New Stream" to create one.</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- VIEW 2: CHANNELS OVERVIEW (Gambar 1) -->
+    <!-- ============================================================ -->
+    <main id="viewChannels" class="page-view">
+      <header class="page-header flex-between">
+        <div>
+          <h1 class="page-title">Channels</h1>
+          <p class="page-subtitle">Manage your broadcasting channels</p>
+        </div>
+        <button class="btn btn-purple-gradient" onclick="App.openCreateChannelModal()">
+          <i data-lucide="plus" class="lucide-icon" style="width:16px;height:16px;"></i> Create Channel
+        </button>
+      </header>
+
+      <!-- Channels Cards Grid -->
+      <div class="channels-grid" id="channelsGrid">
+        <!-- Rendered by JS -->
+      </div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- VIEW 3: MANAGE CHANNEL DETAIL (Gambar 3) -->
+    <!-- ============================================================ -->
+    <main id="viewManageChannel" class="page-view">
+      <div class="back-link" onclick="App.switchNav('channels')">
+        <i data-lucide="arrow-left" class="lucide-icon" style="width:14px;height:14px;"></i> Back to Channels
+      </div>
+
+      <header class="channel-manage-header">
+        <div class="channel-manage-info">
+          <div class="channel-manage-title-row">
+            <h1 class="channel-manage-title" id="manageChannelTitle">Channel Name</h1>
+            <span class="badge-status live">Active</span>
+          </div>
+          <p class="channel-manage-desc" id="manageChannelDesc">RE ROOM</p>
+          <a href="#" target="_blank" class="channel-manage-url" id="manageChannelUrl">https://www.youtube.com/channel/...</a>
+        </div>
+        <div class="channel-manage-actions">
+          <button class="btn btn-dark" onclick="App.openStreamKeyManagerModal()">
+            <i data-lucide="key" class="lucide-icon" style="width:14px;height:14px;margin-right:6px;"></i> Stream Key
+          </button>
+        </div>
+      </header>
+
+      <!-- Sub Tabs: Videos | Audios -->
+      <div class="sub-tabs-bar">
+        <div class="sub-tabs">
+          <button class="sub-tab-btn active" id="subTabVideos" onclick="App.switchSubTab('videos')">Videos</button>
+          <button class="sub-tab-btn" id="subTabAudios" onclick="App.switchSubTab('audios')">Audios</button>
+        </div>
+      </div>
+
+      <!-- Action Bar -->
+      <div class="manage-action-bar">
+        <button class="btn btn-purple-gradient" id="btnUploadMedia" onclick="App.openUploadVideoModal()">
+          <i data-lucide="upload" class="lucide-icon" style="width:16px;height:16px;"></i> Upload Video
+        </button>
+        <button class="btn btn-dark" onclick="App.createPlaylist()">
+          <i data-lucide="list-plus" class="lucide-icon" style="width:16px;height:16px;"></i> Create Playlist
+        </button>
+      </div>
+
+      <!-- 3 Column Layout: Preview | Gallery | Playlist -->
+      <div class="channel-workspace-grid">
+        <!-- Column 1: Video Preview (shown on Videos tab) -->
+        <div class="workspace-card preview-card" id="videoPreviewCard">
+          <div class="card-header-sm">
+            <span class="card-title-sm" id="previewCardTitle">VIDEO PREVIEW</span>
+            <span class="badge-preview">Preview</span>
+          </div>
+          <div class="video-preview-wrapper">
+            <video id="videoPlayer" controls>
+              <source id="videoPlayerSource" src="" type="video/mp4">
+              Your browser does not support the video tag.
+            </video>
+          </div>
+        </div>
+
+        <!-- Column 1: Audio Player (shown on Audios tab) -->
+        <div class="workspace-card preview-card audio-player-card" id="audioPreviewCard" style="display:none;">
+          <div class="card-header-sm">
+            <span class="card-title-sm">AUDIO PREVIEW</span>
+            <span class="badge-preview">Preview</span>
+          </div>
+          <div class="audio-player-body">
+            <div class="audio-player-info">
+              <div class="audio-player-title" id="audioPlayerTitle">Select an audio to play</div>
+              <div class="audio-player-subtitle" id="audioPlayerSubtitle">No audio selected</div>
+            </div>
+            <div class="audio-seek-bar-wrap">
+              <span class="audio-time" id="audioCurrentTime">0:00</span>
+              <div class="audio-seek-bar" id="audioSeekBar" onclick="App.seekAudio(event)">
+                <div class="audio-seek-fill" id="audioSeekFill"></div>
+                <div class="audio-seek-thumb" id="audioSeekThumb"></div>
+              </div>
+              <span class="audio-time" id="audioDurationTime">0:00</span>
+            </div>
+            <div class="audio-controls">
+              <button class="audio-ctrl-btn" id="audioShuffleBtn" onclick="App.toggleAudioShuffle()" title="Shuffle">
+                <i data-lucide="shuffle" class="lucide-icon"></i>
+              </button>
+              <button class="audio-ctrl-btn" onclick="App.prevAudio()" title="Previous">
+                <i data-lucide="skip-back" class="lucide-icon"></i>
+              </button>
+              <button class="audio-ctrl-btn audio-play-btn" id="audioPlayBtn" onclick="App.toggleAudioPlay()" title="Play">
+                <i data-lucide="play" class="lucide-icon" id="audioPlayIcon" style="width:22px;height:22px;"></i>
+              </button>
+              <button class="audio-ctrl-btn" onclick="App.nextAudio()" title="Next">
+                <i data-lucide="skip-forward" class="lucide-icon"></i>
+              </button>
+              <button class="audio-ctrl-btn" id="audioLoopBtn" onclick="App.toggleAudioLoop()" title="Loop">
+                <i data-lucide="repeat" class="lucide-icon"></i>
+              </button>
+            </div>
+            <audio id="audioElement" preload="metadata"></audio>
+          </div>
+        </div>
+
+        <!-- Column 2: Gallery & Playlist Selection -->
+        <div class="workspace-card gallery-card">
+          <!-- Normal Gallery Header -->
+          <div class="gallery-search-header" id="galleryHeaderNormal">
+            <span class="card-title-sm" id="galleryCardTitle">AUDIO GALLERY</span>
+            <div class="search-wrapper search-sm">
+              <i data-lucide="search" class="search-icon lucide-icon"></i>
+              <input type="text" id="gallerySearch" placeholder="Search..." oninput="App.filterGallery()">
+            </div>
+          </div>
+
+          <!-- Playlist Selection Header (Shown when editing playlist) -->
+          <div id="galleryHeaderPlaylistMode" style="display: none; padding: 4px 2px 10px; border-bottom: 1px solid #1e202d; margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <div>
+                <div style="font-size: 13px; font-weight: 700; color: #ffffff;" id="playlistAddTitle">Audio List</div>
+                <div style="font-size: 11px; color: #64748b;" id="playlistAddSubtitle">Select audios to add</div>
+              </div>
+              <button type="button" class="btn-xs-green" id="btnAddToPlaylist" onclick="App.addSelectedToActivePlaylist()">
+                <i data-lucide="plus" style="width: 13px; height: 13px;"></i> Add to Playlist (0)
+              </button>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label class="custom-radio-label" style="font-size: 11px; cursor: pointer;">
+                <input type="checkbox" id="selectAllForPlaylistCheckbox" onchange="App.toggleSelectAllForPlaylist(this.checked)">
+                <span style="color: #94a3b8; font-weight: 600;">Select All</span>
+              </label>
+              <button type="button" class="btn-text-link" style="color: #94a3b8;" onclick="App.exitPlaylistEditMode()">Done / Back</button>
+            </div>
+          </div>
+
+          <div class="gallery-list" id="galleryList">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+
+        <!-- Column 3: Playlist Manager (Matching User's Screenshot) -->
+        <div class="workspace-card playlist-card">
+          <div class="card-header-sm flex-between" style="padding-bottom: 10px; border-bottom: 1px solid #1e202d; margin-bottom: 10px;">
+            <div>
+              <span class="card-title-sm" id="playlistCardHeaderTitle" style="display: block; margin-bottom: 2px;">Audio Playlists</span>
+              <span style="font-size: 11px; color: #64748b;" id="playlistCardSubtitle">Manage your playlists</span>
+            </div>
+            <span class="playlist-count" id="playlistCountBadge" style="background: #181b29; color: #3b82f6; border: 1px solid #282f4c; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 6px;">
+              0 Playlist
+            </span>
+          </div>
+
+          <div id="playlistContentContainer">
+            <!-- Rendered by JS: list of playlists or active playlist details -->
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ============================================================ -->
+    <!-- REAL-TIME SYSTEM METRICS FOOTER (2 ROWS) -->
+    <!-- ============================================================ -->
+    <footer class="system-footer" id="systemFooter">
+      <div class="system-footer-grid">
+        <!-- CPU Usage Card -->
+        <div class="sys-metric-card">
+          <div class="sys-metric-row-top">
+            <div class="sys-metric-title">
+              <i data-lucide="cpu" class="sys-metric-icon sys-icon-cpu"></i>
+              <span>CPU Usage</span>
+            </div>
+            <div class="sys-metric-right">
+              <span class="sys-metric-subtext" id="sysCpuSub">12 Cores Active</span>
+              <span class="sys-metric-value" id="sysCpuValue">0%</span>
+            </div>
+          </div>
+          <div class="sys-metric-row-bottom">
+            <div class="sys-progress-track">
+              <div class="sys-progress-bar bar-cpu" id="sysCpuBar" style="width: 0%;"></div>
+            </div>
+            <span class="sys-status-badge badge-cpu" id="sysCpuStatus">Normal</span>
+          </div>
+        </div>
+
+        <!-- RAM Memory Card -->
+        <div class="sys-metric-card">
+          <div class="sys-metric-row-top">
+            <div class="sys-metric-title">
+              <i data-lucide="hard-drive" class="sys-metric-icon sys-icon-ram"></i>
+              <span>RAM Memory</span>
+            </div>
+            <div class="sys-metric-right">
+              <span class="sys-metric-subtext" id="sysRamSub">0.0 GB / 0.0 GB</span>
+              <span class="sys-metric-value" id="sysRamValue">0%</span>
+            </div>
+          </div>
+          <div class="sys-metric-row-bottom">
+            <div class="sys-progress-track">
+              <div class="sys-progress-bar bar-ram" id="sysRamBar" style="width: 0%;"></div>
+            </div>
+            <span class="sys-status-badge badge-ram" id="sysRamStatus">Healthy</span>
+          </div>
+        </div>
+
+        <!-- Disk Storage Card -->
+        <div class="sys-metric-card">
+          <div class="sys-metric-row-top">
+            <div class="sys-metric-title">
+              <i data-lucide="database" class="sys-metric-icon sys-icon-disk"></i>
+              <span>Disk Space</span>
+            </div>
+            <div class="sys-metric-right">
+              <span class="sys-metric-subtext" id="sysDiskSub">0.0 GB / 0.0 GB</span>
+              <span class="sys-metric-value" id="sysDiskValue">0%</span>
+            </div>
+          </div>
+          <div class="sys-metric-row-bottom">
+            <div class="sys-progress-track">
+              <div class="sys-progress-bar bar-disk" id="sysDiskBar" style="width: 0%;"></div>
+            </div>
+            <span class="sys-status-badge badge-disk" id="sysDiskDrive">Drive</span>
+          </div>
+        </div>
+
+        <!-- Network Traffic Card (Upload / Download) -->
+        <div class="sys-metric-card">
+          <div class="sys-metric-row-top">
+            <div class="sys-metric-title">
+              <i data-lucide="activity" class="sys-metric-icon sys-icon-net"></i>
+              <span>Network I/O</span>
+            </div>
+            <div class="sys-net-rates">
+              <span class="net-rate-up" id="sysNetUp" title="Upload Speed">▲ 0 KB/s</span>
+              <span class="net-rate-down" id="sysNetDown" title="Download Speed">▼ 0 KB/s</span>
+            </div>
+          </div>
+          <div class="sys-metric-row-bottom">
+            <div class="sys-progress-track sys-net-track">
+              <div class="sys-progress-bar bar-net-up" id="sysNetUpBar" style="width: 0%;" title="Upload activity"></div>
+              <div class="sys-progress-bar bar-net-down" id="sysNetDownBar" style="width: 0%;" title="Download activity"></div>
+            </div>
+            <span class="sys-status-badge badge-net" id="sysNetStatus">Active</span>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- MODALS -->
+  <!-- ============================================================ -->
+
+  <!-- Modal 1: Create New Channel (Gambar 2) -->
+  <div class="modal-backdrop" id="createChannelModal" onclick="App.closeCreateChannelModal(event)">
+    <div class="modal-dialog modal-md" onclick="event.stopPropagation()">
+      <div class="modal-header border-none">
+        <div>
+          <h2 class="modal-title-lg">Create New Channel</h2>
+          <p class="modal-subtitle-sm">Set up a new broadcasting channel.</p>
+        </div>
+      </div>
+      <form onsubmit="App.saveNewChannel(event)">
+        <div class="form-group margin-bottom-lg">
+          <label for="newChannelName">Channel Name *</label>
+          <input type="text" id="newChannelName" placeholder="e.g. Main Stream" required>
+        </div>
+        <div class="form-group margin-bottom-xl">
+          <label for="newChannelDesc">Description</label>
+          <textarea id="newChannelDesc" rows="4" placeholder="Describe what this channel will broadcast..."></textarea>
+        </div>
+        <div class="modal-footer flex-end gap-md">
+          <button type="button" class="btn btn-dark-full" onclick="App.closeCreateChannelModal()">Cancel</button>
+          <button type="submit" class="btn btn-blue-primary">Create Channel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 1.5: Edit Channel (Gambar Screenshot Baru) -->
+  <div class="modal-backdrop" id="editChannelModal" onclick="App.closeEditChannelModal(event)">
+    <div class="modal-dialog modal-md" onclick="event.stopPropagation()">
+      <div class="modal-header border-none flex-between">
+        <div>
+          <h2 class="modal-title-lg">Edit Channel</h2>
+          <p class="modal-subtitle-sm">Update your channel details.</p>
+        </div>
+        <button class="btn-close" onclick="App.closeEditChannelModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+      </div>
+      <form onsubmit="App.saveEditedChannel(event)">
+        <input type="hidden" id="editChannelId">
+        <div class="form-group margin-bottom-lg">
+          <label for="editChannelName">Channel Name</label>
+          <input type="text" id="editChannelName" placeholder="e.g. Bossa Breeze Lounge" required>
+        </div>
+        <div class="form-group margin-bottom-lg">
+          <label for="editChannelDesc">Description</label>
+          <textarea id="editChannelDesc" rows="3" placeholder="RE ROOM"></textarea>
+        </div>
+        <div class="form-group margin-bottom-xl">
+          <label for="editChannelUrl">Channel Link (URL)</label>
+          <div class="input-with-icon">
+            <span class="input-icon"><i data-lucide="link" class="lucide-icon" style="width:14px;height:14px;"></i></span>
+            <input type="text" id="editChannelUrl" placeholder="https://www.youtube.com/channel/...">
+          </div>
+        </div>
+        <div class="modal-footer flex-column gap-md">
+          <div class="modal-btn-row">
+            <button type="button" class="btn btn-dark-full" onclick="App.closeEditChannelModal()">Cancel</button>
+            <button type="submit" class="btn btn-blue-primary">Save Changes</button>
+          </div>
+        </div>
+      </form>
+      <div style="margin-top: 12px;">
+        <button type="button" class="btn btn-danger-outline" onclick="App.deleteCurrentChannel(event)">
+          <i data-lucide="trash-2" class="lucide-icon" style="width:15px;height:15px;"></i>
+          Delete Channel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 2: Create New Stream (Matching User's Design) -->
+  <div class="modal-backdrop" id="modalBackdrop" onclick="App.closeModal(event)">
+    <div class="modal-dialog modal-create-stream" onclick="event.stopPropagation()">
+      <div class="create-stream-header">
+        <div>
+          <h2 class="modal-title-lg" id="modalTitle">Create New Stream</h2>
+          <p class="modal-subtitle-sm">Configure stream source, audio, and schedule settings.</p>
+        </div>
+        <div class="create-stream-server-time">
+          <span>Server time: <strong id="modalServerTime">-- --- ---- --:--:--</strong></span>
+          <button class="btn-close" onclick="App.closeModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+        </div>
+      </div>
+
+      <form id="streamForm" onsubmit="App.saveStream(event)">
+        <input type="hidden" id="formId">
+
+        <div class="create-stream-grid">
+          <!-- Left Column: Video Selection & Preview -->
+          <div>
+            <div class="form-group margin-bottom-lg custom-select-wrapper">
+              <label>Channel *</label>
+              <input type="hidden" id="formChannelSelect" value="" required>
+
+              <!-- Custom Select Trigger -->
+              <div class="custom-select-trigger" id="channelSelectTrigger" onclick="App.toggleChannelDropdown(event)">
+                <span id="channelSelectLabel">Select channel...</span>
+                <i data-lucide="chevron-down" id="channelSelectChevron" style="width: 16px; height: 16px; color: #94a3b8; transition: transform 0.2s ease;"></i>
+              </div>
+
+              <!-- Searchable Dropdown Menu -->
+              <div class="custom-select-dropdown" id="channelSelectDropdown" style="display: none;">
+                <div class="custom-select-search-box">
+                  <i data-lucide="search" style="width: 14px; height: 14px; color: #64748b; margin-right: 8px; flex-shrink: 0;"></i>
+                  <input type="text" id="channelSearchInput" placeholder="Search channels..." oninput="App.filterChannelDropdown(this.value)" onclick="event.stopPropagation()">
+                </div>
+                <div class="custom-select-list" id="channelSelectList">
+                  <!-- Rendered via JS -->
+                </div>
+              </div>
+            </div>
+
+            <div class="stream-preview-box" id="streamPreviewBox">
+              <div id="streamPreviewPlaceholder" style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                <i data-lucide="play-circle" style="width: 44px; height: 44px; stroke-width: 1.5; color: #475569;"></i>
+                <span style="font-size: 13px;">Select a video to preview</span>
+              </div>
+              <video id="streamPreviewVideo" controls style="display: none;"></video>
+            </div>
+
+            <div class="pill-switcher">
+              <button type="button" class="pill-btn active" id="pillVideoSingle" onclick="App.setStreamVideoMode('single')">Single Video</button>
+              <button type="button" class="pill-btn" id="pillVideoPlaylist" onclick="App.setStreamVideoMode('playlist')">Video Playlist</button>
+            </div>
+
+            <div class="form-group">
+              <select id="formVideoSelect" onchange="App.onStreamVideoChange()">
+                <option value="">Choose a video...</option>
+              </select>
+            </div>
+
+            <!-- Video Playlist Mode Radio Row (visible when Video Playlist is selected) -->
+            <div id="videoPlaylistPlayModeRow" style="display: none; margin-top: 8px; flex-direction: column; gap: 8px;">
+              <div class="radio-group-row" style="margin-top: 0;">
+                <label class="custom-radio-label">
+                  <input type="radio" name="formVideoPlayMode" value="shuffle" checked>
+                  <span>Shuffle Play</span>
+                </label>
+                <label class="custom-radio-label">
+                  <input type="radio" name="formVideoPlayMode" value="sequential">
+                  <span>Sequential Play</span>
+                </label>
+              </div>
+              <label class="custom-checkbox-label" style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: #cbd5e1; cursor: pointer; background: #141622; padding: 6px 10px; border-radius: 6px; border: 1px solid #242738;">
+                <input type="checkbox" id="formVideoLoop1Hour" style="accent-color: #3b82f6; width: 14px; height: 14px; cursor: pointer;">
+                <span style="font-weight: 600;">Copy / Loop 1 Hour (1H) per video</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Right Column: Stream Title & Audio List -->
+          <div>
+            <div class="form-group margin-bottom-lg">
+              <label for="formName">Stream Title</label>
+              <input type="text" id="formName" placeholder="Enter stream title..." required>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 6px;">
+              <div>
+                <label style="margin-bottom: 2px; display: block;">Audio List</label>
+                <div style="font-size: 11px; color: var(--text-sub);" id="audioSelectedSubtitle">
+                  <span>Select tracks</span>
+                  <span id="audioTrackQuickSelect" style="margin-left: 6px; display: none;">
+                    | <button type="button" class="btn-text-link" onclick="App.selectAllTracks(true)">All</button>
+                    <button type="button" class="btn-text-link" onclick="App.selectAllTracks(false)">None</button>
+                  </span>
+                </div>
+              </div>
+              <div class="pill-switcher" style="margin-bottom: 0;">
+                <button type="button" class="pill-btn" id="pillAudioPlaylist" onclick="App.setStreamAudioType('playlist')">Playlist</button>
+                <button type="button" class="pill-btn active" id="pillAudioTrack" onclick="App.setStreamAudioType('track')">Track</button>
+              </div>
+            </div>
+
+            <!-- When Playlist Mode is active -->
+            <div class="form-group margin-bottom-md" id="audioPlaylistSelectWrap" style="margin-top: 8px; display: none;">
+              <select id="formAudioSelect" onchange="App.onStreamAudioChange()">
+                <option value="">Select a channel to view playlists</option>
+              </select>
+            </div>
+
+            <!-- When Track Mode is active (Matching User's Screenshot) -->
+            <div class="track-list-box" id="audioTrackListBox" style="margin-top: 8px;">
+              <!-- Rendered by JS -->
+            </div>
+
+            <div class="radio-group-row">
+              <label class="custom-radio-label">
+                <input type="radio" name="formAudioPlayMode" value="shuffle" checked>
+                <span>Shuffle Play</span>
+              </label>
+              <label class="custom-radio-label">
+                <input type="radio" name="formAudioPlayMode" value="sequential">
+                <span>Sequential Play</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Section: Stream Configuration -->
+        <div class="stream-config-section">
+          <div class="stream-config-title">Stream Configuration</div>
+          <div class="stream-config-grid">
+            <div class="form-group">
+              <label for="formRtmp">RTMP URL</label>
+              <select id="formRtmp" required>
+                <option value="rtmp://a.rtmp.youtube.com/live2">rtmp://a.rtmp.youtube.com/live2</option>
+                <option value="rtmp://b.rtmp.youtube.com/live2?backup=1">rtmp://b.rtmp.youtube.com/live2?backup=1</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="formKeySelect">Stream Key</label>
+              <select id="formKeySelect" required>
+                <option value="">Select stream key...</option>
+              </select>
+              <span style="font-size: 11px; color: #64748b; margin-top: 6px; display: block;">Stream keys marked as used are disabled.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer flex-end gap-md" style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #1e202d;">
+          <button type="button" class="btn btn-dark-full" onclick="App.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-blue-primary" id="formSubmitBtn">Create Stream</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 3: Log Pop-up Terminal -->
+  <div class="modal-backdrop" id="logModalBackdrop" onclick="App.closeLogModal(event)">
+    <div class="modal-dialog log-modal-dialog" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="log-modal-title">
+          <i data-lucide="terminal" class="lucide-icon log-terminal-icon"></i> Log Terminal: <span id="logModalStreamName" class="log-stream-target">Stream Name</span>
+          <code id="logModalStreamKey" class="log-key-badge">key</code>
+        </div>
+        <div class="log-modal-header-actions">
+          <button class="btn btn-sm btn-ghost" onclick="App.clearLogModal()">Clear</button>
+          <button class="btn-close" onclick="App.closeLogModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+        </div>
+      </div>
+      <div class="log-modal-body" id="logModalContent">
+        <div class="log-placeholder">Connecting to stream logs...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 5: Upload Videos Modal -->
+  <div class="modal-backdrop" id="uploadVideoModal" onclick="App.closeUploadVideoModal(event)">
+    <div class="modal-dialog modal-upload-dialog" onclick="event.stopPropagation()">
+      <div class="modal-header border-none flex-between">
+        <div>
+          <h2 class="modal-title-lg">Upload Videos</h2>
+          <p class="modal-subtitle-sm">Please upload video files (mp4, mov, avi) and make sure the file size is reasonable.</p>
+        </div>
+        <button class="btn-close" onclick="App.closeUploadVideoModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+      </div>
+
+      <!-- File Queue List -->
+      <div class="upload-file-list" id="uploadVideoFileList"></div>
+
+      <!-- Dropzone -->
+      <div class="upload-dropzone" id="uploadVideoDropzone" onclick="document.getElementById('uploadVideoFileInput').click()" ondragover="App.handleDragOver(event)" ondragleave="App.handleDragLeave(event)" ondrop="App.handleVideoDrop(event)">
+        <input type="file" id="uploadVideoFileInput" multiple accept=".mp4,.mov,.avi,.mkv,.webm" style="display:none" onchange="App.handleVideoFileSelect(event)">
+        <div class="dropzone-content" id="uploadVideoDropzoneContent">
+          <div class="dropzone-plus"><i data-lucide="upload-cloud" class="lucide-icon" style="width:28px;height:28px;"></i></div>
+          <div class="dropzone-text" id="uploadVideoDropzoneText">Drag or Browse Files</div>
+        </div>
+      </div>
+
+      <div class="upload-footer-format">Format: mp4, mov, avi</div>
+
+      <div class="modal-footer flex-between gap-md" style="margin-top: 16px;">
+        <button type="button" class="btn btn-dark-full" onclick="App.closeUploadVideoModal()">Cancel</button>
+        <button type="button" class="btn btn-blue-primary" id="uploadVideoSubmitBtn" onclick="App.submitVideoUpload()" disabled>Upload</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 6: Upload Audios Modal -->
+  <div class="modal-backdrop" id="uploadAudioModal" onclick="App.closeUploadAudioModal(event)">
+    <div class="modal-dialog modal-upload-dialog" onclick="event.stopPropagation()">
+      <div class="modal-header border-none flex-between">
+        <div>
+          <h2 class="modal-title-lg">Upload Audios</h2>
+          <p class="modal-subtitle-sm">Please upload audio files (mp3, wav, ogg) and make sure the file size is reasonable.</p>
+        </div>
+        <button class="btn-close" onclick="App.closeUploadAudioModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+      </div>
+
+      <!-- File Queue List -->
+      <div class="upload-file-list" id="uploadAudioFileList"></div>
+
+      <!-- Dropzone -->
+      <div class="upload-dropzone" id="uploadAudioDropzone" onclick="document.getElementById('uploadAudioFileInput').click()" ondragover="App.handleDragOver(event)" ondragleave="App.handleDragLeave(event)" ondrop="App.handleAudioDrop(event)">
+        <input type="file" id="uploadAudioFileInput" multiple accept=".mp3,.wav,.ogg,.aac,.flac,.m4a" style="display:none" onchange="App.handleAudioFileSelect(event)">
+        <div class="dropzone-content" id="uploadAudioDropzoneContent">
+          <div class="dropzone-plus"><i data-lucide="upload-cloud" class="lucide-icon" style="width:28px;height:28px;"></i></div>
+          <div class="dropzone-text" id="uploadAudioDropzoneText">Drag or Browse Files</div>
+        </div>
+      </div>
+
+      <div class="upload-footer-format">Format: mp3, wav, ogg</div>
+
+      <div class="modal-footer flex-between gap-md" style="margin-top: 16px;">
+        <button type="button" class="btn btn-dark-full" onclick="App.closeUploadAudioModal()">Cancel</button>
+        <button type="button" class="btn btn-blue-primary" id="uploadAudioSubmitBtn" onclick="App.submitAudioUpload()" disabled>Upload</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 4: Custom Confirm Delete Modal -->
+  <div class="modal-backdrop" id="confirmDeleteModal" onclick="App.closeConfirmDeleteModal(event)">
+    <div class="modal-dialog modal-md" onclick="event.stopPropagation()">
+      <div class="modal-header border-none flex-between">
+        <h3 class="modal-title-lg" style="color: #ef4444;">Delete Confirmation</h3>
+        <button class="btn-close" onclick="App.closeConfirmDeleteModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+      </div>
+      <div style="padding: 16px 0 24px 0; color: var(--text-main); font-size: 14px; line-height: 1.5;">
+        <p id="confirmDeleteText">Are you sure you want to delete this item?</p>
+      </div>
+      <div class="modal-footer flex-between gap-md" style="padding-top: 10px;">
+        <button type="button" class="btn btn-dark-full" onclick="App.closeConfirmDeleteModal()">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmDeleteSubmitBtn">Delete Now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 7: Stream Key Manager Modal (Gambar 1) -->
+  <div class="modal-backdrop" id="streamKeyManagerModal" onclick="App.closeStreamKeyManagerModal(event)">
+    <div class="modal-dialog modal-streamkey-manager" onclick="event.stopPropagation()">
+      <div class="modal-header border-none flex-between" style="padding-bottom: 12px;">
+        <div>
+          <h2 class="modal-title-lg">Stream Key Manager</h2>
+          <p class="modal-subtitle-sm">Manage stream keys for this channel</p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <button type="button" class="btn btn-blue-primary" style="padding: 5px 12px; font-size: 11.5px;" onclick="App.openAddStreamKeyModal()">
+            <i data-lucide="plus" style="width: 13px; height: 13px;"></i> Add Stream Key
+          </button>
+          <button class="btn-close" onclick="App.closeStreamKeyManagerModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+        </div>
+      </div>
+      
+      <div class="streamkey-table-container">
+        <table class="streamkey-table">
+          <thead>
+            <tr>
+              <th style="width: 140px;">Name</th>
+              <th style="width: 220px;">Stream Key</th>
+              <th style="width: 100px;">Status</th>
+              <th>Stream Use</th>
+              <th style="width: 100px; text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="streamKeyTableBody">
+            <!-- Rendered by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 8: Add / Edit Stream Key Modal (Gambar 2) -->
+  <div class="modal-backdrop" id="addStreamKeyModal" onclick="App.closeAddStreamKeyModal(event)" style="z-index: 120;">
+    <div class="modal-dialog modal-md" onclick="event.stopPropagation()" style="max-width: 440px;">
+      <div class="modal-header border-none flex-between">
+        <h2 class="modal-title-lg" id="addStreamKeyTitle">Add Stream Key</h2>
+        <button class="btn-close" onclick="App.closeAddStreamKeyModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+      </div>
+      <form onsubmit="App.saveStreamKey(event)">
+        <input type="hidden" id="formStreamKeyId">
+        <div class="form-group margin-bottom-lg">
+          <label for="formStreamKeyName">Name</label>
+          <input type="text" id="formStreamKeyName" placeholder="e.g. KEY1" required>
+        </div>
+        <div class="form-group margin-bottom-xl">
+          <label for="formStreamKeyValue">Stream Key</label>
+          <input type="text" id="formStreamKeyValue" placeholder="xxxx-xxxx-xxxx-xxxx" required>
+        </div>
+        <div class="modal-footer flex-end gap-md">
+          <button type="button" class="btn btn-dark-full" onclick="App.closeAddStreamKeyModal()">Cancel</button>
+          <button type="submit" class="btn btn-blue-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 9: Create Playlist Modal (Matching User's Screenshot) -->
+  <div class="modal-backdrop" id="createPlaylistModal" onclick="App.closeCreatePlaylistModal(event)">
+    <div class="modal-dialog modal-md" onclick="event.stopPropagation()" style="max-width: 440px;">
+      <div class="modal-header border-none" style="display: flex; align-items: flex-start; gap: 14px; padding-bottom: 8px;">
+        <div class="file-icon-box" id="playlistModalIconBox" style="width: 40px; height: 40px; font-size: 16px; border-radius: 10px; flex-shrink: 0;">
+          <i data-lucide="music" id="playlistModalIcon" style="width: 20px; height: 20px;"></i>
+        </div>
+        <div style="flex: 1;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h2 class="modal-title-lg" id="createPlaylistTitle">Create Playlist</h2>
+            <button class="btn-close" onclick="App.closeCreatePlaylistModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+          </div>
+          <p class="modal-subtitle-sm" id="createPlaylistSubtitle" style="margin-top: 2px;">0 audio files selected for this playlist.</p>
+        </div>
+      </div>
+
+      <form onsubmit="App.saveNewPlaylist(event)">
+        <input type="hidden" id="playlistType" value="audio">
+        
+        <div class="form-group margin-bottom-lg" style="margin-top: 14px;">
+          <label for="playlistName">Playlist Name *</label>
+          <div class="input-with-icon" style="position: relative;">
+            <input type="text" id="playlistName" placeholder="Enter playlist name..." required style="padding-right: 36px;">
+            <i data-lucide="edit-2" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: #64748b; pointer-events: none;"></i>
+          </div>
+          <span class="form-helper-text" id="playlistNameHelper" style="font-size: 11px; color: #64748b; margin-top: 4px; display: block;">Choose a unique name for your audio playlist</span>
+        </div>
+
+        <div class="form-group margin-bottom-lg">
+          <label for="playlistDescription">Description <span style="color: #64748b; font-weight: normal;">(Optional)</span></label>
+          <textarea id="playlistDescription" rows="3" placeholder="Enter playlist description..." style="resize: none;"></textarea>
+          <span class="form-helper-text" style="font-size: 11px; color: #64748b; margin-top: 4px; display: block;">Add a description to help identify this playlist</span>
+        </div>
+
+        <!-- Total Files Card -->
+        <div class="playlist-files-card" style="display: flex; align-items: center; justify-content: space-between; background: #141622; border: 1px solid #242738; border-radius: 10px; padding: 14px 16px; margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div class="file-icon-box" id="playlistCardIconBox" style="width: 32px; height: 32px; font-size: 14px; border-radius: 8px;">
+              <i data-lucide="music" id="playlistCardIcon" style="width: 16px; height: 16px;"></i>
+            </div>
+            <div>
+              <div style="font-size: 13px; font-weight: 700; color: #ffffff;" id="playlistCardTitle">Total Audio Files</div>
+              <div style="font-size: 11px; color: #64748b;">Ready to be added</div>
+            </div>
+          </div>
+          <div style="font-size: 20px; font-weight: 700; color: #3b82f6;" id="playlistFilesCount">0</div>
+        </div>
+
+        <div class="modal-footer flex-end gap-md">
+          <button type="button" class="btn btn-dark-full" onclick="App.closeCreatePlaylistModal()">Cancel</button>
+          <button type="submit" class="btn btn-blue-primary">Create Playlist</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 10: Change Credentials Modal -->
+  <div class="modal-backdrop" id="credentialsModal" onclick="App.closeCredentialsModal(event)">
+    <div class="modal-dialog modal-md" onclick="event.stopPropagation()" style="max-width: 400px;">
+      <div class="modal-header border-none flex-between">
+        <div>
+          <h2 class="modal-title-lg">Change Credentials</h2>
+          <p class="modal-subtitle-sm">Update your admin username and password</p>
+        </div>
+        <button class="btn-close" onclick="App.closeCredentialsModal()"><i data-lucide="x" class="lucide-icon"></i></button>
+      </div>
+
+      <form onsubmit="App.saveCredentials(event)">
+        <div class="form-group margin-bottom-lg">
+          <label for="credCurrentPassword">Current Password *</label>
+          <input type="password" id="credCurrentPassword" placeholder="Enter current password..." required autocomplete="current-password">
+        </div>
+
+        <div class="form-group margin-bottom-lg">
+          <label for="credNewUsername">Username *</label>
+          <input type="text" id="credNewUsername" placeholder="e.g. admin" required autocomplete="username">
+        </div>
+
+        <div class="form-group margin-bottom-lg">
+          <label for="credNewPassword">New Password <span style="color: #64748b; font-weight: normal;">(Leave blank if unchanged)</span></label>
+          <input type="password" id="credNewPassword" placeholder="Enter new password..." autocomplete="new-password">
+        </div>
+
+        <div class="form-group margin-bottom-xl">
+          <label for="credConfirmPassword">Confirm New Password</label>
+          <input type="password" id="credConfirmPassword" placeholder="Repeat new password..." autocomplete="new-password">
+        </div>
+
+        <div class="modal-footer flex-end gap-md">
+          <button type="button" class="btn btn-dark-full" onclick="App.closeCredentialsModal()">Cancel</button>
+          <button type="submit" class="btn btn-blue-primary" id="credSubmitBtn">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Stack -->
+  <div class="toast-stack" id="toastStack"></div>
+
+  <script src="/app.js?v=5.8.0"></script>
+</body>
+</html>

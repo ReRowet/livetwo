@@ -1,0 +1,27 @@
+{
+  "name": "ytre-live-streaming-web",
+  "version": "1.0.0",
+  "description": "YTRE Live Streaming — Web-based FFmpeg stream manager",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop re-stream-web",
+    "pm2:restart": "pm2 restart re-stream-web",
+    "pm2:reload": "pm2 reload re-stream-web",
+    "pm2:logs": "pm2 logs re-stream-web",
+    "pm2:status": "pm2 status",
+    "pm2:delete": "pm2 delete re-stream-web"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.2.0",
+    "systeminformation": "^5.33.1"
+  }
+}

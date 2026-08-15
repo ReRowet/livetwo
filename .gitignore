@@ -1,0 +1,40 @@
+# ============================================================
+# Git Ignore Configuration for RE Stream / Live Streaming Web
+# ============================================================
+
+# Dependencies
+node_modules/
+
+# Environment Configurations (Contain sensitive secrets)
+.env
+.env.local
+.env.*.local
+
+# Runtime Logs
+logs/*
+!logs/.gitkeep
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Generated Playlists
+playlists/*
+!playlists/.gitkeep
+
+# Uploaded Media (Videos, Audios, Thumbnails)
+uploads/videos/*
+!uploads/videos/.gitkeep
+uploads/audios/*
+!uploads/audios/.gitkeep
+uploads/thumbnails/*
+!uploads/thumbnails/.gitkeep
+
+# Session Tokens & Temporary Workspace
+data/sessions.json
+scratch/
+
+# OS and IDE Metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "msugmz5iz6n7up",
+    "name": "g",
+    "channelName": "Test Channel",
+    "thumbnail": "",
+    "streamKey": "vzh0-dhzf-z5zb-1816-49zp",
+    "videoPath": "/uploads/videos/My_Video_1786803314954.mp4",
+    "audioPath": "D:/Script/PROJECTAKH/Live/Live Web/live v1.4 - Copy/uploads/audios/Cosmic_Cassette__1__raw_1786803337676.aac,D:/Script/PROJECTAKH/Live/Live Web/live v1.4 - Copy/uploads/audios/Cosmic_Cassette_raw_1786803337755.aac,D:/Script/PROJECTAKH/Live/Live Web/live v1.4 - Copy/uploads/audios/Cassette_Comet__3__raw_1786803337781.aac,D:/Script/PROJECTAKH/Live/Live Web/live v1.4 - Copy/uploads/audios/Cassette_Comet__2__raw_1786803337844.aac,D:/Script/PROJECTAKH/Live/Live Web/live v1.4 - Copy/uploads/audios/Cassette_Cosmos__3__raw_1786803337858.aac",
+    "videoMode": "sequential",
+    "audioMode": "shuffle",
+    "audioType": "track",
+    "videoLoop1Hour": false,
+    "rtmpUrl": "rtmp://a.rtmp.youtube.com/live2",
+    "platform": "YouTube",
+    "type": "Single"
+  }
+]
