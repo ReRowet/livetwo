@@ -29,8 +29,9 @@ uploads/audios/*
 uploads/thumbnails/*
 !uploads/thumbnails/.gitkeep
 
-# Session Tokens & Temporary Workspace
-data/sessions.json
+# Runtime Data & Session Tokens
+data/*
+!data/.gitkeep
 scratch/
 
 # OS and IDE Metadata

@@ -113,15 +113,19 @@ fi
 if [ "$NODE_INSTALLED" = false ]; then
   if command -v apt-get >/dev/null 2>&1; then
     echo "Menginstall Node.js 20.x LTS via NodeSource..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO_CMD -E bash -
+    if [ -n "$SUDO_CMD" ]; then
+      curl -fsSL https://deb.nodesource.com/setup_20.x | $SUDO_CMD -E bash -
+    else
+      curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    fi
     $SUDO_CMD apt-get install -y nodejs
   elif command -v dnf >/dev/null 2>&1; then
     echo "Menginstall Node.js 20.x LTS via NodeSource..."
-    curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO_CMD bash -
+    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
     $SUDO_CMD dnf install -y nodejs
   elif command -v yum >/dev/null 2>&1; then
     echo "Menginstall Node.js 20.x LTS via NodeSource..."
-    curl -fsSL https://rpm.nodesource.com/setup_20.x | $SUDO_CMD bash -
+    curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
     $SUDO_CMD yum install -y nodejs
   else
     print_error "Gagal menginstall Node.js otomatis. Silakan install Node.js >= 18 manual."
