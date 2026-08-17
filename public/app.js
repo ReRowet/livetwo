@@ -23,13 +23,21 @@ const App = {
   accessToken: localStorage.getItem('re_stream_access_token') || sessionStorage.getItem('re_stream_access_token') || '',
   refreshToken: localStorage.getItem('re_stream_refresh_token') || sessionStorage.getItem('re_stream_refresh_token') || '',
   currentUser: JSON.parse(localStorage.getItem('re_stream_user') || sessionStorage.getItem('re_stream_user') || 'null'),
-  isRefreshing: false,
+  _refreshPromise: null,
 
   async init() {
     this.setupFetchInterceptor();
     this.updateClock();
     setInterval(() => this.updateClock(), 1000);
     setInterval(() => this.updateDurations(), 1000);
+
+    // Proactive silent token refresh every 10 minutes (access token expires in 15 mins)
+    setInterval(() => {
+      if (this.accessToken && this.refreshToken) {
+        this.refreshAuthToken();
+      }
+    }, 10 * 60 * 1000);
+
     this.refreshIcons();
 
     document.addEventListener('keydown', (e) => {
@@ -89,7 +97,11 @@ const App = {
       // Inject Authorization Bearer token for API endpoints (except login/refresh)
       if (url && url.includes('/api/') && !url.includes('/api/auth/login') && !url.includes('/api/auth/refresh')) {
         if (!init.headers) init.headers = {};
-        if (!(init.headers instanceof Headers)) {
+        if (init.headers instanceof Headers) {
+          if (self.accessToken && !init.headers.has('Authorization')) {
+            init.headers.set('Authorization', `Bearer ${self.accessToken}`);
+          }
+        } else {
           if (self.accessToken && !init.headers['Authorization']) {
             init.headers['Authorization'] = `Bearer ${self.accessToken}`;
           }
@@ -105,21 +117,20 @@ const App = {
 
       // Handle 401 Unauthorized with automatic JWT Token Refresh
       if (response.status === 401 && url && url.includes('/api/') && !url.includes('/api/auth/')) {
-        if (self.refreshToken && !self.isRefreshing) {
-          self.isRefreshing = true;
+        if (self.refreshToken) {
           const ok = await self.refreshAuthToken();
-          self.isRefreshing = false;
-
           if (ok) {
             if (!init.headers) init.headers = {};
-            if (!(init.headers instanceof Headers)) {
+            if (init.headers instanceof Headers) {
+              init.headers.set('Authorization', `Bearer ${self.accessToken}`);
+            } else {
               init.headers['Authorization'] = `Bearer ${self.accessToken}`;
             }
             return await _originalFetch(resource, init);
           } else {
             self.handleAuthFailure('Session expired. Please log in again.');
           }
-        } else if (!self.refreshToken) {
+        } else {
           self.handleAuthFailure('Session token required. Please log in.');
         }
       }
@@ -150,29 +161,42 @@ const App = {
   },
 
   async refreshAuthToken() {
-    try {
-      const res = await fetch(`${API}/api/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: this.refreshToken })
-      });
+    if (!this.refreshToken) return false;
 
-      if (!res.ok) return false;
-
-      const data = await res.json();
-      if (data.success && data.accessToken) {
-        this.accessToken = data.accessToken;
-        if (localStorage.getItem('re_stream_access_token')) {
-          localStorage.setItem('re_stream_access_token', data.accessToken);
-        } else {
-          sessionStorage.setItem('re_stream_access_token', data.accessToken);
-        }
-        return true;
-      }
-      return false;
-    } catch (e) {
-      return false;
+    // If a refresh is already in flight, return the same promise to prevent multiple concurrent refresh calls
+    if (this._refreshPromise) {
+      return this._refreshPromise;
     }
+
+    this._refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${API}/api/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: this.refreshToken })
+        });
+
+        if (!res.ok) return false;
+
+        const data = await res.json();
+        if (data.success && data.accessToken) {
+          this.accessToken = data.accessToken;
+          if (localStorage.getItem('re_stream_access_token')) {
+            localStorage.setItem('re_stream_access_token', data.accessToken);
+          } else {
+            sessionStorage.setItem('re_stream_access_token', data.accessToken);
+          }
+          return true;
+        }
+        return false;
+      } catch (e) {
+        return false;
+      } finally {
+        this._refreshPromise = null;
+      }
+    })();
+
+    return this._refreshPromise;
   },
 
   async handleLogin(event) {
