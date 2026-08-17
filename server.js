@@ -1734,6 +1734,31 @@ async function getSystemMetrics() {
   }
 }
 
+// Global Error Handling Middleware (including Multer & client request aborts)
+app.use((err, req, res, next) => {
+  if (err) {
+    if (err.message === 'Request aborted' || err.code === 'ECONNABORTED' || req.aborted) {
+      console.warn(`[Upload Warning] Request aborted by client: ${req.originalUrl}`);
+      if (!res.headersSent) {
+        return res.status(499).json({ error: 'Client aborted upload request' });
+      }
+      return;
+    }
+    if (err instanceof multer.MulterError) {
+      console.warn(`[Multer Error] ${err.code}: ${err.message}`);
+      if (!res.headersSent) {
+        return res.status(400).json({ error: `Upload error: ${err.message}` });
+      }
+      return;
+    }
+    console.error('[Unhandled Server Error]', err);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  }
+  next();
+});
+
 // Start Server
 app.listen(PORT, async () => {
   console.log(`\n  ╔══════════════════════════════════════════╗`);

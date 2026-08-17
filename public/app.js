@@ -1344,52 +1344,89 @@ const App = {
   async submitVideoUpload() {
     if (!this.currentChannel || this.pendingVideoFiles.length === 0) return;
     const submitBtn = document.getElementById('uploadVideoSubmitBtn');
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Uploading...';
-    }
+    const totalFiles = this.pendingVideoFiles.length;
+    let successCount = 0;
+    let failCount = 0;
 
-    // Activate progress bars & hide remove buttons
+    if (submitBtn) submitBtn.disabled = true;
+
+    // Activate all progress bars & hide remove buttons
     this.pendingVideoFiles.forEach((_, i) => {
       const wrap = document.getElementById(`videoProgressWrap_${i}`);
       const btn = document.getElementById(`videoFileRemove_${i}`);
+      const statusEl = document.getElementById(`videoFileStatus_${i}`);
       if (wrap) wrap.classList.add('active');
       if (btn) btn.style.display = 'none';
+      if (statusEl) statusEl.textContent = i === 0 ? 'Mempersiapkan upload...' : 'Menunggu antrian...';
     });
 
-    const formData = new FormData();
-    for (const file of this.pendingVideoFiles) {
-      formData.append('videos', file);
-    }
+    // Process files sequentially one-by-one
+    for (let i = 0; i < totalFiles; i++) {
+      const file = this.pendingVideoFiles[i];
+      if (submitBtn) {
+        submitBtn.textContent = `Uploading (${i + 1}/${totalFiles})...`;
+      }
 
-    try {
-      const data = await this.uploadXHR(`${API}/api/channels/${this.currentChannel.id}/upload-videos`, formData, (percent) => {
-        this.pendingVideoFiles.forEach((_, i) => {
-          const fill = document.getElementById(`videoProgressFill_${i}`);
-          const percentEl = document.getElementById(`videoFilePercent_${i}`);
-          const statusEl = document.getElementById(`videoFileStatus_${i}`);
+      const fill = document.getElementById(`videoProgressFill_${i}`);
+      const percentEl = document.getElementById(`videoFilePercent_${i}`);
+      const statusEl = document.getElementById(`videoFileStatus_${i}`);
+
+      if (statusEl) statusEl.textContent = 'Mengunggah (0%)...';
+
+      const formData = new FormData();
+      formData.append('videos', file);
+
+      try {
+        const data = await this.uploadXHR(`${API}/api/channels/${this.currentChannel.id}/upload-videos`, formData, (percent) => {
           if (fill) fill.style.width = `${percent}%`;
           if (percentEl) percentEl.textContent = `${percent}%`;
-          if (statusEl) statusEl.textContent = percent === 100 ? 'Processing video...' : `Uploading (${percent}%)...`;
+          if (statusEl) {
+            statusEl.textContent = percent >= 100 
+              ? 'Memproses thumbnail & durasi...' 
+              : `Mengunggah (${percent}%)...`;
+          }
         });
-      });
 
-      if (data && data.success) {
-        this.toast(`Uploaded ${data.count} video(s) successfully!`, 'success');
+        if (data && data.success) {
+          successCount++;
+          if (fill) {
+            fill.style.width = '100%';
+            fill.classList.add('success');
+          }
+          if (percentEl) {
+            percentEl.textContent = '100%';
+            percentEl.classList.add('success');
+          }
+          if (statusEl) statusEl.textContent = 'Selesai ✅';
+        } else {
+          failCount++;
+          if (fill) fill.classList.add('error');
+          if (percentEl) percentEl.classList.add('error');
+          if (statusEl) statusEl.textContent = `Gagal: ${(data && data.error) || 'Upload error'} ❌`;
+        }
+      } catch (err) {
+        failCount++;
+        console.error(`Upload error on ${file.name}:`, err);
+        if (fill) fill.classList.add('error');
+        if (percentEl) percentEl.classList.add('error');
+        if (statusEl) statusEl.textContent = `Gagal: ${(err && err.error) || 'Network error'} ❌`;
+      }
+    }
+
+    if (successCount > 0) {
+      this.toast(`Berhasil mengunggah ${successCount} dari ${totalFiles} video!`, 'success');
+      await this.fetchChannels();
+      this.openManageChannel(this.currentChannel.id);
+      setTimeout(() => {
         this.closeUploadVideoModal();
-        await this.fetchChannels();
-        this.openManageChannel(this.currentChannel.id);
-      } else {
-        this.toast((data && data.error) || 'Failed to upload videos', 'error');
-      }
-    } catch (e) {
-      console.error('Upload video error:', e);
-      this.toast('Error uploading video files', 'error');
-    } finally {
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Upload';
-      }
+      }, 1000);
+    } else {
+      this.toast('Semua upload video gagal.', 'error');
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Upload';
     }
   },
 
@@ -1481,78 +1518,139 @@ const App = {
   async submitAudioUpload() {
     if (!this.currentChannel || this.pendingAudioFiles.length === 0) return;
     const submitBtn = document.getElementById('uploadAudioSubmitBtn');
-    if (submitBtn) {
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Uploading & Converting...';
-    }
+    const totalFiles = this.pendingAudioFiles.length;
+    let successCount = 0;
+    let failCount = 0;
 
-    // Activate progress bars & hide remove buttons
+    if (submitBtn) submitBtn.disabled = true;
+
+    // Activate all progress bars & hide remove buttons
     this.pendingAudioFiles.forEach((_, i) => {
       const wrap = document.getElementById(`audioProgressWrap_${i}`);
       const btn = document.getElementById(`audioFileRemove_${i}`);
+      const statusEl = document.getElementById(`audioFileStatus_${i}`);
       if (wrap) wrap.classList.add('active');
       if (btn) btn.style.display = 'none';
+      if (statusEl) statusEl.textContent = i === 0 ? 'Mempersiapkan upload...' : 'Menunggu antrian...';
     });
 
-    const formData = new FormData();
-    for (const file of this.pendingAudioFiles) {
-      formData.append('audios', file);
-    }
+    // Process audios sequentially one-by-one
+    for (let i = 0; i < totalFiles; i++) {
+      const file = this.pendingAudioFiles[i];
+      if (submitBtn) {
+        submitBtn.textContent = `Uploading & Converting (${i + 1}/${totalFiles})...`;
+      }
 
-    try {
-      const data = await this.uploadXHR(`${API}/api/channels/${this.currentChannel.id}/upload-audios`, formData, (percent) => {
-        this.pendingAudioFiles.forEach((_, i) => {
-          const fill = document.getElementById(`audioProgressFill_${i}`);
-          const percentEl = document.getElementById(`audioFilePercent_${i}`);
-          const statusEl = document.getElementById(`audioFileStatus_${i}`);
+      const fill = document.getElementById(`audioProgressFill_${i}`);
+      const percentEl = document.getElementById(`audioFilePercent_${i}`);
+      const statusEl = document.getElementById(`audioFileStatus_${i}`);
+
+      if (statusEl) statusEl.textContent = 'Mengunggah (0%)...';
+
+      const formData = new FormData();
+      formData.append('audios', file);
+
+      try {
+        const data = await this.uploadXHR(`${API}/api/channels/${this.currentChannel.id}/upload-audios`, formData, (percent) => {
           if (fill) fill.style.width = `${percent}%`;
           if (percentEl) percentEl.textContent = `${percent}%`;
-          if (statusEl) statusEl.textContent = percent === 100 ? 'Converting to 192k AAC...' : `Uploading (${percent}%)...`;
+          if (statusEl) {
+            statusEl.textContent = percent >= 100 
+              ? 'Mengonversi ke 192k AAC...' 
+              : `Mengunggah (${percent}%)...`;
+          }
         });
-      });
 
-      if (data && data.success) {
-        this.toast(`Uploaded & converted ${data.count} audio(s) to 192k AAC!`, 'success');
+        if (data && data.success) {
+          successCount++;
+          if (fill) {
+            fill.style.width = '100%';
+            fill.classList.add('success');
+          }
+          if (percentEl) {
+            percentEl.textContent = '100%';
+            percentEl.classList.add('success');
+          }
+          if (statusEl) statusEl.textContent = 'Selesai (192k AAC) ✅';
+        } else {
+          failCount++;
+          if (fill) fill.classList.add('error');
+          if (percentEl) percentEl.classList.add('error');
+          if (statusEl) statusEl.textContent = `Gagal: ${(data && data.error) || 'Upload error'} ❌`;
+        }
+      } catch (err) {
+        failCount++;
+        console.error(`Upload audio error on ${file.name}:`, err);
+        if (fill) fill.classList.add('error');
+        if (percentEl) percentEl.classList.add('error');
+        if (statusEl) statusEl.textContent = `Gagal: ${(err && err.error) || 'Network error'} ❌`;
+      }
+    }
+
+    if (successCount > 0) {
+      this.toast(`Berhasil mengunggah & mengonversi ${successCount} dari ${totalFiles} audio ke 192k AAC!`, 'success');
+      await this.fetchChannels();
+      this.openManageChannel(this.currentChannel.id);
+      setTimeout(() => {
         this.closeUploadAudioModal();
-        await this.fetchChannels();
-        this.openManageChannel(this.currentChannel.id);
-      } else {
-        this.toast((data && data.error) || 'Failed to upload audios', 'error');
-      }
-    } catch (e) {
-      console.error('Upload audio error:', e);
-      this.toast('Error uploading audio files', 'error');
-    } finally {
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Upload';
-      }
+      }, 1000);
+    } else {
+      this.toast('Semua upload audio gagal.', 'error');
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Upload';
     }
   },
 
-  uploadXHR(url, formData, onProgress) {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', url, true);
-      if (this.accessToken) {
-        xhr.setRequestHeader('Authorization', `Bearer ${this.accessToken}`);
-      }
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && onProgress) {
-          const percent = Math.round((e.loaded / e.total) * 100);
-          onProgress(percent);
+  async uploadXHR(url, formData, onProgress) {
+    const doUpload = (token) => {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
         }
-      };
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try { resolve(JSON.parse(xhr.responseText)); } catch (_) { resolve(xhr.responseText); }
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && onProgress) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            onProgress(percent);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try { resolve(JSON.parse(xhr.responseText)); } catch (_) { resolve(xhr.responseText); }
+          } else {
+            let errObj = { status: xhr.status, error: `Server status ${xhr.status}` };
+            try {
+              const parsed = JSON.parse(xhr.responseText);
+              errObj = { status: xhr.status, ...parsed };
+            } catch (_) {}
+            reject(errObj);
+          }
+        };
+        xhr.onerror = () => reject({ status: 0, error: 'Network upload error' });
+        xhr.send(formData);
+      });
+    };
+
+    try {
+      return await doUpload(this.accessToken);
+    } catch (err) {
+      // Auto refresh token on 401 Unauthorized
+      if (err && err.status === 401 && this.refreshToken && !this.isRefreshing) {
+        this.isRefreshing = true;
+        const refreshed = await this.refreshAuthToken();
+        this.isRefreshing = false;
+        if (refreshed) {
+          return await doUpload(this.accessToken);
         } else {
-          try { reject(JSON.parse(xhr.responseText)); } catch (_) { reject({ error: `Server status ${xhr.status}` }); }
+          this.handleAuthFailure('Session expired. Please log in again.');
         }
-      };
-      xhr.onerror = () => reject({ error: 'Network upload error' });
-      xhr.send(formData);
-    });
+      }
+      throw err;
+    }
   },
 
   formatFileSize(bytes) {

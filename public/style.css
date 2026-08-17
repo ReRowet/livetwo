@@ -1425,11 +1425,27 @@ svg.search-icon {
   transition: width 0.15s ease;
 }
 
+.file-progress-bar-fill.success {
+  background: #10b981 !important;
+}
+
+.file-progress-bar-fill.error {
+  background: #ef4444 !important;
+}
+
 .file-progress-percent {
   font-size: 11px;
   font-weight: 600;
   color: #60a5fa;
   margin-left: 8px;
+}
+
+.file-progress-percent.success {
+  color: #34d399 !important;
+}
+
+.file-progress-percent.error {
+  color: #f87171 !important;
 }
 
 .upload-file-name {
