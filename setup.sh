@@ -162,23 +162,65 @@ mkdir -p "$PROJECT_DIR/public"
 
 chmod -R 755 "$PROJECT_DIR/data" "$PROJECT_DIR/logs" "$PROJECT_DIR/playlists" "$PROJECT_DIR/uploads" || true
 
+# Port Configuration Selection (80, 3002, or custom)
+CURRENT_PORT=3002
+if [ -f "$PROJECT_DIR/.env" ]; then
+  DETECTED_PORT=$(grep "^PORT=" "$PROJECT_DIR/.env" | cut -d '=' -f 2 | tr -d ' \r\n')
+  if [ -n "$DETECTED_PORT" ]; then
+    CURRENT_PORT="$DETECTED_PORT"
+  fi
+fi
+
+echo -e "\n${CYAN}${BOLD}Pilih Port Web Server yang ingin digunakan:${NC}"
+echo "  1) Port 80   (Standard HTTP — Akses langsung tanpa :port di URL, misal http://IP-VPS/)"
+echo "  2) Port 3002 (Default Custom Port — Akses via http://IP-VPS:3002/)"
+echo "  3) Custom Port (Tentukan nomor port sendiri)"
+
+CHOSEN_PORT="$CURRENT_PORT"
+if [ -t 0 ]; then
+  read -rp "Masukkan pilihan [1/2/3] (default: 2 / port $CURRENT_PORT): " PORT_CHOICE
+  case "$PORT_CHOICE" in
+    1)
+      CHOSEN_PORT=80
+      ;;
+    2)
+      CHOSEN_PORT=3002
+      ;;
+    3)
+      read -rp "Masukkan nomor port yang diinginkan: " USER_PORT
+      if [ -n "$USER_PORT" ]; then
+        CHOSEN_PORT="$USER_PORT"
+      fi
+      ;;
+    *)
+      # Keep current/default
+      ;;
+  esac
+fi
+
+print_success "Port yang dipilih: $CHOSEN_PORT"
+
 if [ ! -f "$PROJECT_DIR/.env" ]; then
   if [ -f "$PROJECT_DIR/.env.example" ]; then
     cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env"
-    print_success "Membuat .env dari .env.example"
   else
-    cat << 'EOF' > "$PROJECT_DIR/.env"
+    cat << EOF > "$PROJECT_DIR/.env"
 AUTH_USERNAME=admin
 AUTH_PASSWORD=admin123
 JWT_SECRET=re_stream_jwt_secret_token_2026_super_secure
 JWT_REFRESH_SECRET=re_stream_jwt_refresh_secret_2026_super_secure
-PORT=3002
+PORT=$CHOSEN_PORT
 EOF
-    print_success "Membuat file .env baru dengan konfigurasi default"
   fi
-else
-  print_success "File .env sudah ada"
 fi
+
+# Update or insert PORT in .env
+if grep -q "^PORT=" "$PROJECT_DIR/.env"; then
+  sed -i "s/^PORT=.*/PORT=$CHOSEN_PORT/" "$PROJECT_DIR/.env"
+else
+  echo "PORT=$CHOSEN_PORT" >> "$PROJECT_DIR/.env"
+fi
+print_success "Konfigurasi .env tersimpan (PORT=$CHOSEN_PORT)"
 
 # ------------------------------------------------------------------------------
 # 6. NPM Dependencies Installation

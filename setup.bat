@@ -95,28 +95,44 @@ echo [OK] Folder data, logs, playlists, uploads, dan bin siap.
 echo.
 
 :: -----------------------------------------------------------------------------
-:: 4. Setup .env
+:: 4. Setup Port & .env
 :: -----------------------------------------------------------------------------
-echo [4/5] Menyiapkan file konfigurasi .env...
-if exist ".env" goto :env_exists
-if exist ".env.example" (
-    copy ".env.example" ".env" >nul
-    echo [OK] Berhasil membuat .env dari template .env.example
-    goto :env_done
+echo [4/5] Menyiapkan file konfigurasi & Port Server...
+echo.
+echo Pilih Port Web Server yang ingin digunakan:
+echo   1) Port 80   (Standard HTTP - Akses via http://localhost)
+echo   2) Port 3002 (Default Custom - Akses via http://localhost:3002)
+echo   3) Custom Port
+echo.
+
+set "TARGET_PORT=3002"
+set /p PORT_INPUT="Pilih nomor port [1/2/3] (default: 2 / port 3002): "
+if "%PORT_INPUT%"=="1" set "TARGET_PORT=80"
+if "%PORT_INPUT%"=="2" set "TARGET_PORT=3002"
+if "%PORT_INPUT%"=="3" (
+    set /p USER_P="Masukkan nomor port yang diinginkan: "
+    if defined USER_P set "TARGET_PORT=!USER_P!"
 )
 
-(
-    echo AUTH_USERNAME=admin
-    echo AUTH_PASSWORD=admin123
-    echo JWT_SECRET=re_stream_jwt_secret_token_2026_super_secure
-    echo JWT_REFRESH_SECRET=re_stream_jwt_refresh_secret_2026_super_secure
-    echo PORT=3002
-) > ".env"
-echo [OK] Berhasil membuat file .env baru
+echo [OK] Port yang dipilih: %TARGET_PORT%
 
-:env_exists
-echo [OK] File .env sudah ada.
-:env_done
+if not exist ".env" (
+    if exist ".env.example" (
+        copy ".env.example" ".env" >nul
+    ) else (
+        (
+            echo AUTH_USERNAME=admin
+            echo AUTH_PASSWORD=admin123
+            echo JWT_SECRET=re_stream_jwt_secret_token_2026_super_secure
+            echo JWT_REFRESH_SECRET=re_stream_jwt_refresh_secret_2026_super_secure
+            echo PORT=%TARGET_PORT%
+        ) > ".env"
+    )
+)
+
+:: Update PORT in .env using powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$path = '.env'; if (Test-Path $path) { $c = Get-Content $path -Raw; if ($c -match '^PORT=.*') { $c = $c -replace '(?m)^PORT=.*', 'PORT=%TARGET_PORT%' } else { $c += \"`nPORT=%TARGET_PORT%\" }; Set-Content -Path $path -Value $c -NoNewline }"
+echo [OK] Konfigurasi .env tersimpan (PORT=%TARGET_PORT%)
 echo.
 
 :: -----------------------------------------------------------------------------
@@ -142,7 +158,7 @@ echo Untuk menjalankan server:
 echo  1. Jalankan langsung dengan start.bat (atau 'npm start')
 echo  2. Atau dengan PM2: 'npm run pm2:start' (atau double-click pm2-manage.bat)
 echo.
-echo Akses Web Dashboard di: http://localhost:3002
+echo Akses Web Dashboard di: http://localhost:%TARGET_PORT%
 echo Default Login: admin / admin123
 echo ==============================================================================
 echo.
@@ -150,8 +166,8 @@ echo.
 set /p RUN_NOW="Apakah Anda ingin langsung menjalankan server sekarang? (Y/N): "
 if /i "%RUN_NOW%"=="Y" (
     echo.
-    echo Menjalankan server...
-    start http://localhost:3002
+    echo Menjalankan server di port %TARGET_PORT%...
+    start http://localhost:%TARGET_PORT%
     node server.js
 )
 
