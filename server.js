@@ -1068,6 +1068,10 @@ class StreamManager {
         command
           .on('start', (commandLine) => {
             this._log(s, `fluent-ffmpeg launched: ${commandLine}`, 'info');
+            if (command.ffmpegProc && command.ffmpegProc.pid) {
+              s.pid = command.ffmpegProc.pid;
+              this._log(s, `FFmpeg running (PID ${command.ffmpegProc.pid})`, 'success');
+            }
           })
           .on('progress', (progress) => {
             const now = Date.now();
@@ -1089,9 +1093,8 @@ class StreamManager {
         const proc = command.run();
         s.commandInstance = command;
         s.proc = proc;
-        if (proc && proc.pid) {
-          s.pid = proc.pid;
-          this._log(s, `FFmpeg running via fluent-ffmpeg (PID ${proc.pid})`, 'success');
+        if (command.ffmpegProc && command.ffmpegProc.pid) {
+          s.pid = command.ffmpegProc.pid;
         }
         s.status = 'live';
         this._broadcastStatus();
@@ -1904,6 +1907,9 @@ async function getZombieProcesses() {
     if (s.status === 'live' || s.status === 'retrying') {
       if (s.pid) activePids.add(Number(s.pid));
       if (s.proc && s.proc.pid) activePids.add(Number(s.proc.pid));
+      if (s.commandInstance && s.commandInstance.ffmpegProc && s.commandInstance.ffmpegProc.pid) {
+        activePids.add(Number(s.commandInstance.ffmpegProc.pid));
+      }
     }
   }
 
