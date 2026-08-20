@@ -2140,11 +2140,11 @@ app.listen(PORT, async () => {
   console.log(`  ╚══════════════════════════════════════════╝\n`);
   await channelStore.fixDurations();
 
-  // Periodic System Stats Broadcast every 2.5 seconds
+  // Periodic System Stats Broadcast every 10 seconds
   setInterval(async () => {
     try {
       const stats = await getSystemMetrics();
       manager._broadcastSystemStats(stats);
     } catch (_) {}
-  }, 2500);
+  }, 10000);
 });
