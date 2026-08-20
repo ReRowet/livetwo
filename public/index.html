@@ -761,14 +761,14 @@
 
       <!-- Dropzone -->
       <div class="upload-dropzone" id="uploadAudioDropzone" onclick="document.getElementById('uploadAudioFileInput').click()" ondragover="App.handleDragOver(event)" ondragleave="App.handleDragLeave(event)" ondrop="App.handleAudioDrop(event)">
-        <input type="file" id="uploadAudioFileInput" multiple accept=".mp3,.wav,.ogg,.aac,.flac,.m4a" style="display:none" onchange="App.handleAudioFileSelect(event)">
+        <input type="file" id="uploadAudioFileInput" multiple accept=".mp3,.wav,.ogg,.aac,.flac,.m4a,.mp4" style="display:none" onchange="App.handleAudioFileSelect(event)">
         <div class="dropzone-content" id="uploadAudioDropzoneContent">
           <div class="dropzone-plus"><i data-lucide="upload-cloud" class="lucide-icon" style="width:28px;height:28px;"></i></div>
           <div class="dropzone-text" id="uploadAudioDropzoneText">Drag or Browse Files</div>
         </div>
       </div>
 
-      <div class="upload-footer-format">Format: mp3, wav, ogg</div>
+      <div class="upload-footer-format">Format: mp3, wav, ogg, aac, mp4</div>
 
       <div class="modal-footer flex-between gap-md" style="margin-top: 16px;">
         <button type="button" class="btn btn-dark-full" onclick="App.closeUploadAudioModal()">Cancel</button>

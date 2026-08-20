@@ -289,6 +289,65 @@ function generateVideoThumbnail(videoPath, thumbPath) {
   });
 }
 
+function checkVideoCompatibility(filePath) {
+  return new Promise((resolve) => {
+    const safePath = normalizeFilePath(filePath);
+    if (!safePath || !fs.existsSync(safePath)) {
+      return resolve({ compatible: false, reason: 'File tidak ditemukan di server.' });
+    }
+    ffmpeg.ffprobe(safePath, (err, metadata) => {
+      if (err || !metadata || !metadata.streams) {
+        return resolve({ compatible: false, reason: 'Gagal mendeteksi metadata file (bukan file video valid).' });
+      }
+
+      let videoStream = null;
+      let audioStream = null;
+
+      for (const stream of metadata.streams) {
+        if (stream.codec_type === 'video') {
+          videoStream = stream;
+        } else if (stream.codec_type === 'audio') {
+          audioStream = stream;
+        }
+      }
+
+      if (!videoStream) {
+        return resolve({ compatible: false, reason: 'File tidak memiliki track video.' });
+      }
+
+      // Check Video Codec (Must be h264/avc)
+      if (videoStream.codec_name !== 'h264') {
+        return resolve({ compatible: false, reason: `Codec video adalah ${videoStream.codec_name || 'unknown'} (wajib h264).` });
+      }
+
+      // Check Resolution (Must be 720p, 1080p, or 4K)
+      const width = videoStream.width || 0;
+      const height = videoStream.height || 0;
+      const allowedResolutions = [
+        { w: 1280, h: 720 },
+        { w: 1920, h: 1080 },
+        { w: 3840, h: 2160 }
+      ];
+      const isResValid = allowedResolutions.some(r => r.w === width && r.h === height);
+      if (!isResValid) {
+        return resolve({ compatible: false, reason: `Resolusi video adalah ${width}x${height} (wajib 1280x720, 1920x1080, atau 3840x2160).` });
+      }
+
+      // Check Audio Stream (Must exist)
+      if (!audioStream) {
+        return resolve({ compatible: false, reason: 'Video tidak memiliki track suara/audio (wajib memiliki track audio).' });
+      }
+
+      // Check Audio Codec (Must be aac)
+      if (audioStream.codec_name !== 'aac') {
+        return resolve({ compatible: false, reason: `Codec audio adalah ${audioStream.codec_name || 'unknown'} (wajib aac).` });
+      }
+
+      resolve({ compatible: true });
+    });
+  });
+}
+
 function getMediaDuration(filePath) {
   return new Promise((resolve) => {
     const safePath = normalizeFilePath(filePath);
@@ -816,7 +875,7 @@ class StreamManager {
 
     let audios = [];
     if (s.audioPath) {
-      audios = this._resolveFiles(s.audioPath, ['.mp3', '.aac', '.wav', '.m4a', '.ogg', '.flac']);
+      audios = this._resolveFiles(s.audioPath, ['.mp3', '.aac', '.wav', '.m4a', '.ogg', '.flac', '.mp4']);
     }
 
     s.type = (videos.length > 1 || audios.length > 1) ? 'Concat' : 'Single';
@@ -1591,6 +1650,18 @@ app.post('/api/channels/:id/upload-videos', uploadVideosMulter.array('videos'), 
     return res.status(400).json({ error: 'No video files uploaded' });
   }
 
+  // First pass: validate all uploaded videos
+  for (const file of req.files) {
+    const comp = await checkVideoCompatibility(file.path);
+    if (!comp.compatible) {
+      // Clean up all uploaded files in this batch to keep disk clean
+      for (const f of req.files) {
+        try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) {}
+      }
+      return res.status(400).json({ error: `File "${file.originalname}" tidak kompatibel: ${comp.reason}` });
+    }
+  }
+
   const added = [];
   for (const file of req.files) {
     const sizeMb = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
@@ -1629,20 +1700,52 @@ app.post('/api/channels/:id/upload-audios', uploadAudiosMulter.array('audios'), 
   const added = [];
   for (const file of req.files) {
     const rawPath = file.path;
-    const aacFilename = path.basename(file.filename, path.extname(file.filename)) + '.aac';
+    // Fix filename collision by removing '_raw_' from target file path
+    const aacFilename = path.basename(file.filename, path.extname(file.filename)).replace('_raw_', '_') + '.aac';
     const aacPath = path.join(UPLOADS_AUDIOS_DIR, aacFilename);
 
-    try {
-      // Auto convert to standard 192k AAC 44.1kHz
-      await convertAudioToAAC(rawPath, aacPath);
+    let success = false;
+    let duration = '0:00';
+    let sizeMb = '0.00 MB';
+    let errorMessage = '';
+
+    // Convert with retry loop (up to 2 retries) and check for corruption
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        if (fs.existsSync(aacPath)) {
+          try { fs.unlinkSync(aacPath); } catch (_) {}
+        }
+
+        await convertAudioToAAC(rawPath, aacPath);
+
+        if (!fs.existsSync(aacPath) || fs.statSync(aacPath).size === 0) {
+          throw new Error('Hasil konversi kosong atau file tidak terbentuk.');
+        }
+
+        duration = await getMediaDuration(aacPath);
+        if (duration === '0:00') {
+          throw new Error('File hasil konversi terdeteksi korup (durasi 0:00).');
+        }
+
+        const stat = fs.statSync(aacPath);
+        sizeMb = (stat.size / (1024 * 1024)).toFixed(2) + ' MB';
+        success = true;
+        break;
+      } catch (err) {
+        errorMessage = err.message;
+        console.warn(`[Audio Convert Attempt ${attempt}] Failed for ${file.originalname}: ${err.message}`);
+        if (fs.existsSync(aacPath)) {
+          try { fs.unlinkSync(aacPath); } catch (_) {}
+        }
+      }
+    }
+
+    if (success) {
       // Remove raw file after successful conversion
       try { if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath); } catch (_) {}
 
-      const stat = fs.statSync(aacPath);
-      const sizeMb = (stat.size / (1024 * 1024)).toFixed(2) + ' MB';
       const webUrl = `/uploads/audios/${aacFilename}`;
       const fullPath = aacPath.replace(/\\/g, '/');
-      const duration = await getMediaDuration(aacPath);
 
       const audioItem = channelStore.addAudio(channelId, {
         title: file.originalname.replace(/\.[^/.]+$/, "") + '.aac',
@@ -1652,21 +1755,12 @@ app.post('/api/channels/:id/upload-audios', uploadAudiosMulter.array('audios'), 
         filePath: fullPath
       });
       added.push(audioItem);
-    } catch (err) {
-      console.error(`Audio conversion failed for ${file.originalname}:`, err.message);
-      // Fallback if conversion fails
-      const sizeMb = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-      const webUrl = `/uploads/audios/${file.filename}`;
-      const fullPath = file.path.replace(/\\/g, '/');
-      const duration = await getMediaDuration(rawPath);
-      const audioItem = channelStore.addAudio(channelId, {
-        title: file.originalname,
-        size: sizeMb,
-        duration: duration,
-        url: webUrl,
-        filePath: fullPath
-      });
-      added.push(audioItem);
+    } else {
+      // Clean up all uploaded raw files in this request if any fails
+      for (const f of req.files) {
+        try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) {}
+      }
+      return res.status(400).json({ error: `Gagal mengonversi audio "${file.originalname}": ${errorMessage}` });
     }
   }
 

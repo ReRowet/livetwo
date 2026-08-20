@@ -1482,7 +1482,7 @@ const App = {
   },
 
   addAudioFilesToQueue(files) {
-    const validExts = ['.mp3', '.wav', '.ogg', '.aac', '.flac', '.m4a'];
+    const validExts = ['.mp3', '.wav', '.ogg', '.aac', '.flac', '.m4a', '.mp4'];
     for (const file of files) {
       const ext = '.' + file.name.split('.').pop().toLowerCase();
       if (!validExts.includes(ext)) {
