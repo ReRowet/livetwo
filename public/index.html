@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/style.css?v=5.8.0">
+  <link rel="stylesheet" href="/style.css?v=5.8.1">
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 <body>
@@ -910,49 +910,195 @@
     </div>
   </div>
 
-  <!-- Modal 10: Change Credentials Modal -->
+  <!-- Modal 10: Profile & System Maintenance Modal -->
   <div class="modal-backdrop" id="credentialsModal" onclick="App.closeCredentialsModal(event)">
-    <div class="modal-dialog modal-md" onclick="event.stopPropagation()" style="max-width: 400px;">
-      <div class="modal-header border-none flex-between">
-        <div>
-          <h2 class="modal-title-lg">Change Credentials</h2>
-          <p class="modal-subtitle-sm">Update your admin username and password</p>
+    <div class="modal-dialog modal-md profile-maintenance-modal" onclick="event.stopPropagation()" style="max-width: 640px; width: 100%;">
+      <div class="modal-header border-none flex-between" style="padding-bottom: 8px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div class="profile-avatar-icon-box">
+            <i data-lucide="user-check" style="width: 20px; height: 20px; color: #8b5cf6;"></i>
+          </div>
+          <div>
+            <h2 class="modal-title-lg" style="font-size: 16px; margin: 0;">Profile & System</h2>
+            <p class="modal-subtitle-sm" style="margin-top: 2px;">Manage credentials & server maintenance</p>
+          </div>
         </div>
         <button class="btn-close" onclick="App.closeCredentialsModal()"><i data-lucide="x" class="lucide-icon"></i></button>
       </div>
 
-      <form onsubmit="App.saveCredentials(event)">
-        <div class="form-group margin-bottom-lg">
-          <label for="credCurrentPassword">Current Password *</label>
-          <input type="password" id="credCurrentPassword" placeholder="Enter current password..." required autocomplete="current-password">
+      <!-- Navigation Tabs -->
+      <div class="profile-modal-tabs">
+        <button type="button" class="profile-tab-btn active" id="tabBtnAccount" onclick="App.switchProfileTab('account')">
+          <i data-lucide="lock" style="width: 14px; height: 14px;"></i>
+          <span>Account Settings</span>
+        </button>
+        <button type="button" class="profile-tab-btn" id="tabBtnMaintenance" onclick="App.switchProfileTab('maintenance')">
+          <i data-lucide="sparkles" style="width: 14px; height: 14px;"></i>
+          <span>System Maintenance</span>
+          <span class="maint-indicator-dot" id="maintBadgeDot" style="display: none;"></span>
+        </button>
+      </div>
+
+      <!-- Tab 1: Account Settings Pane -->
+      <div class="profile-tab-pane active" id="profileTabAccount">
+        <form onsubmit="App.saveCredentials(event)">
+          <div class="form-group margin-bottom-md">
+            <label for="credCurrentPassword">Current Password *</label>
+            <div class="input-with-icon" style="position: relative;">
+              <input type="password" id="credCurrentPassword" placeholder="Enter current password..." required autocomplete="current-password">
+              <i data-lucide="key" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: #64748b; pointer-events: none;"></i>
+            </div>
+          </div>
+
+          <div class="form-group margin-bottom-md">
+            <label for="credNewUsername">Username *</label>
+            <div class="input-with-icon" style="position: relative;">
+              <input type="text" id="credNewUsername" placeholder="e.g. admin" required autocomplete="username">
+              <i data-lucide="user" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: #64748b; pointer-events: none;"></i>
+            </div>
+          </div>
+
+          <div class="form-group margin-bottom-md">
+            <label for="credNewPassword">New Password <span style="color: #64748b; font-weight: normal;">(Leave blank if unchanged)</span></label>
+            <div class="input-with-icon" style="position: relative;">
+              <input type="password" id="credNewPassword" placeholder="Enter new password..." autocomplete="new-password">
+              <i data-lucide="shield" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: #64748b; pointer-events: none;"></i>
+            </div>
+          </div>
+
+          <div class="form-group margin-bottom-lg">
+            <label for="credConfirmPassword">Confirm New Password</label>
+            <div class="input-with-icon" style="position: relative;">
+              <input type="password" id="credConfirmPassword" placeholder="Repeat new password..." autocomplete="new-password">
+              <i data-lucide="check" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: #64748b; pointer-events: none;"></i>
+            </div>
+          </div>
+
+          <div class="modal-footer flex-end gap-md" style="margin-top: 14px;">
+            <button type="button" class="btn btn-dark-full" onclick="App.closeCredentialsModal()">Cancel</button>
+            <button type="submit" class="btn btn-blue-primary" id="credSubmitBtn">Save Changes</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Tab 2: System Maintenance Pane -->
+      <div class="profile-tab-pane" id="profileTabMaintenance" style="display: none;">
+        <!-- Status Overview Cards -->
+        <div class="maint-stats-grid">
+          <div class="maint-stat-card">
+            <div class="maint-stat-icon-wrap bg-blue-glow">
+              <i data-lucide="database" style="width: 16px; height: 16px; color: #3b82f6;"></i>
+            </div>
+            <div class="maint-stat-info">
+              <span class="maint-stat-label">CACHE & LOGS</span>
+              <div class="maint-stat-val" id="maintCacheStat">0 files</div>
+              <span class="maint-stat-sub" id="maintCacheSub">0.00 MB</span>
+            </div>
+          </div>
+
+          <div class="maint-stat-card">
+            <div class="maint-stat-icon-wrap bg-orange-glow">
+              <i data-lucide="trash-2" style="width: 16px; height: 16px; color: #f59e0b;"></i>
+            </div>
+            <div class="maint-stat-info">
+              <span class="maint-stat-label">ORPHAN UPLOADS</span>
+              <div class="maint-stat-val" id="maintOrphanStat">0 files</div>
+              <span class="maint-stat-sub" id="maintOrphanSub">0.00 MB</span>
+            </div>
+          </div>
+
+          <div class="maint-stat-card">
+            <div class="maint-stat-icon-wrap bg-purple-glow">
+              <i data-lucide="cpu" style="width: 16px; height: 16px; color: #a855f7;"></i>
+            </div>
+            <div class="maint-stat-info">
+              <span class="maint-stat-label">ZOMBIE FFMPEG</span>
+              <div class="maint-stat-val" id="maintZombieStat">0 proc</div>
+              <span class="maint-stat-sub" id="maintZombieSub">Clean</span>
+            </div>
+          </div>
         </div>
 
-        <div class="form-group margin-bottom-lg">
-          <label for="credNewUsername">Username *</label>
-          <input type="text" id="credNewUsername" placeholder="e.g. admin" required autocomplete="username">
+        <!-- One Click Deep Clean Button -->
+        <div class="maint-primary-action-wrap">
+          <button type="button" class="btn btn-purple-gradient maint-deep-clean-btn" id="btnMaintDeepClean" onclick="App.runMaintenanceAction('clean-all')">
+            <i data-lucide="sparkles" style="width: 16px; height: 16px;"></i>
+            <span>One-Click Deep Clean</span>
+          </button>
+          <button type="button" class="btn btn-dark-full maint-refresh-status-btn" onclick="App.loadMaintenanceStatus(true)" title="Refresh status">
+            <i data-lucide="refresh-cw" id="maintRefreshIcon" style="width: 14px; height: 14px;"></i>
+          </button>
         </div>
 
-        <div class="form-group margin-bottom-lg">
-          <label for="credNewPassword">New Password <span style="color: #64748b; font-weight: normal;">(Leave blank if unchanged)</span></label>
-          <input type="password" id="credNewPassword" placeholder="Enter new password..." autocomplete="new-password">
+        <!-- Result Box -->
+        <div id="maintResultBox" class="maint-result-box" style="display: none;">
+          <div class="maint-result-content">
+            <i data-lucide="check-circle" style="width: 16px; height: 16px; color: #10b981; flex-shrink: 0;"></i>
+            <span id="maintResultMsg">Cleanup completed successfully.</span>
+          </div>
         </div>
 
-        <div class="form-group margin-bottom-xl">
-          <label for="credConfirmPassword">Confirm New Password</label>
-          <input type="password" id="credConfirmPassword" placeholder="Repeat new password..." autocomplete="new-password">
+        <!-- Action Items List -->
+        <div class="maint-actions-list">
+          <!-- Item 1: Cache -->
+          <div class="maint-action-item">
+            <div class="maint-action-left">
+              <div class="maint-action-icon bg-blue-subtle">
+                <i data-lucide="file-text" style="width: 15px; height: 15px; color: #60a5fa;"></i>
+              </div>
+              <div class="maint-action-texts">
+                <div class="maint-action-title">Clean Cache & Logs</div>
+                <div class="maint-action-desc">Remove concat playlist txt files & stopped stream logs</div>
+              </div>
+            </div>
+            <button type="button" class="btn btn-secondary-sm maint-item-btn" id="btnCleanCache" onclick="App.runMaintenanceAction('clean-cache')">
+              <span>Clean</span>
+            </button>
+          </div>
+
+          <!-- Item 2: Zombies -->
+          <div class="maint-action-item">
+            <div class="maint-action-left">
+              <div class="maint-action-icon bg-purple-subtle">
+                <i data-lucide="activity" style="width: 15px; height: 15px; color: #c084fc;"></i>
+              </div>
+              <div class="maint-action-texts">
+                <div class="maint-action-title">Kill Zombie FFmpeg</div>
+                <div class="maint-action-desc">Terminate orphan background processes & sync stream states</div>
+              </div>
+            </div>
+            <button type="button" class="btn btn-secondary-sm maint-item-btn" id="btnCleanZombies" onclick="App.runMaintenanceAction('clean-zombies')">
+              <span>Kill</span>
+            </button>
+          </div>
+
+          <!-- Item 3: Orphan Uploads -->
+          <div class="maint-action-item">
+            <div class="maint-action-left">
+              <div class="maint-action-icon bg-orange-subtle">
+                <i data-lucide="folder-x" style="width: 15px; height: 15px; color: #fbbf24;"></i>
+              </div>
+              <div class="maint-action-texts">
+                <div class="maint-action-title">Clean Orphan Uploads</div>
+                <div class="maint-action-desc">Delete video, audio, or thumb files unlinked to any channel</div>
+              </div>
+            </div>
+            <button type="button" class="btn btn-secondary-sm maint-item-btn btn-danger-hover" id="btnCleanUploads" onclick="App.runMaintenanceAction('clean-uploads')">
+              <span>Purge</span>
+            </button>
+          </div>
         </div>
 
-        <div class="modal-footer flex-end gap-md">
-          <button type="button" class="btn btn-dark-full" onclick="App.closeCredentialsModal()">Cancel</button>
-          <button type="submit" class="btn btn-blue-primary" id="credSubmitBtn">Save Changes</button>
+        <div class="modal-footer flex-end" style="margin-top: 14px; padding-top: 8px;">
+          <button type="button" class="btn btn-dark-full" onclick="App.closeCredentialsModal()">Close</button>
         </div>
-      </form>
+      </div>
     </div>
   </div>
 
   <!-- Toast Stack -->
   <div class="toast-stack" id="toastStack"></div>
 
-  <script src="/app.js?v=5.8.0"></script>
+  <script src="/app.js?v=5.8.1"></script>
 </body>
 </html>

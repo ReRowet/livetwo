@@ -3085,6 +3085,12 @@ const App = {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   },
 
+  refreshIcons() {
+    if (window.lucide && typeof window.lucide.createIcons === 'function') {
+      window.lucide.createIcons();
+    }
+  },
+
   openCredentialsModal() {
     const modal = document.getElementById('credentialsModal');
     if (!modal) return;
@@ -3097,9 +3103,145 @@ const App = {
     if (newUsernameEl) newUsernameEl.value = (this.currentUser && this.currentUser.username) || 'admin';
     if (newPassEl) newPassEl.value = '';
     if (confirmPassEl) confirmPassEl.value = '';
-    
+
+    const resBox = document.getElementById('maintResultBox');
+    if (resBox) resBox.style.display = 'none';
+
+    this.switchProfileTab('account');
     modal.classList.add('active');
-    if (window.lucide) lucide.createIcons();
+    this.refreshIcons();
+    
+    // Silently check maintenance status
+    this.loadMaintenanceStatus(false);
+  },
+
+  switchProfileTab(tabName) {
+    const tabAccountBtn = document.getElementById('tabBtnAccount');
+    const tabMaintBtn = document.getElementById('tabBtnMaintenance');
+    const paneAccount = document.getElementById('profileTabAccount');
+    const paneMaint = document.getElementById('profileTabMaintenance');
+
+    if (tabName === 'maintenance') {
+      if (tabAccountBtn) tabAccountBtn.classList.remove('active');
+      if (tabMaintBtn) tabMaintBtn.classList.add('active');
+      if (paneAccount) {
+        paneAccount.classList.remove('active');
+        paneAccount.style.display = 'none';
+      }
+      if (paneMaint) {
+        paneMaint.classList.add('active');
+        paneMaint.style.display = 'block';
+      }
+      this.loadMaintenanceStatus(false);
+    } else {
+      if (tabMaintBtn) tabMaintBtn.classList.remove('active');
+      if (tabAccountBtn) tabAccountBtn.classList.add('active');
+      if (paneMaint) {
+        paneMaint.classList.remove('active');
+        paneMaint.style.display = 'none';
+      }
+      if (paneAccount) {
+        paneAccount.classList.add('active');
+        paneAccount.style.display = 'block';
+      }
+    }
+    this.refreshIcons();
+  },
+
+  async loadMaintenanceStatus(isManualRefresh = false) {
+    const refreshIcon = document.getElementById('maintRefreshIcon');
+    if (isManualRefresh && refreshIcon) refreshIcon.classList.add('spin-icon');
+
+    try {
+      const res = await fetch('/api/system/maintenance/status');
+      if (!res.ok) throw new Error('Failed to fetch maintenance status');
+      const data = await res.json();
+
+      if (data.success) {
+        const cacheStat = document.getElementById('maintCacheStat');
+        const cacheSub = document.getElementById('maintCacheSub');
+        const orphanStat = document.getElementById('maintOrphanStat');
+        const orphanSub = document.getElementById('maintOrphanSub');
+        const zombieStat = document.getElementById('maintZombieStat');
+        const zombieSub = document.getElementById('maintZombieSub');
+        const badgeDot = document.getElementById('maintBadgeDot');
+
+        if (cacheStat) cacheStat.textContent = `${data.cache.count} file${data.cache.count !== 1 ? 's' : ''}`;
+        if (cacheSub) cacheSub.textContent = data.cache.totalFormatted;
+
+        if (orphanStat) orphanStat.textContent = `${data.orphanUploads.count} file${data.orphanUploads.count !== 1 ? 's' : ''}`;
+        if (orphanSub) orphanSub.textContent = data.orphanUploads.totalFormatted;
+
+        if (zombieStat) zombieStat.textContent = `${data.zombies.count} proc`;
+        if (zombieSub) zombieSub.textContent = data.zombies.count > 0 ? `${data.zombies.count} orphan active` : 'Clean';
+
+        const hasWork = data.cache.count > 0 || data.orphanUploads.count > 0 || data.zombies.count > 0;
+        if (badgeDot) badgeDot.style.display = hasWork ? 'inline-block' : 'none';
+
+        if (isManualRefresh) {
+          this.toast('Maintenance status refreshed', 'success');
+        }
+      }
+    } catch (err) {
+      if (isManualRefresh) this.toast(err.message || 'Failed to refresh status', 'error');
+    } finally {
+      if (refreshIcon) refreshIcon.classList.remove('spin-icon');
+    }
+  },
+
+  async runMaintenanceAction(actionType) {
+    let targetBtn = null;
+    let originalHtml = '';
+
+    if (actionType === 'clean-all') {
+      targetBtn = document.getElementById('btnMaintDeepClean');
+    } else if (actionType === 'clean-cache') {
+      targetBtn = document.getElementById('btnCleanCache');
+    } else if (actionType === 'clean-zombies') {
+      targetBtn = document.getElementById('btnCleanZombies');
+    } else if (actionType === 'clean-uploads') {
+      targetBtn = document.getElementById('btnCleanUploads');
+    }
+
+    if (targetBtn) {
+      originalHtml = targetBtn.innerHTML;
+      targetBtn.disabled = true;
+      targetBtn.innerHTML = `<i data-lucide="loader-2" class="spin-icon" style="width: 14px; height: 14px;"></i> <span>Cleaning...</span>`;
+      this.refreshIcons();
+    }
+
+    try {
+      const res = await fetch(`/api/system/maintenance/${actionType}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Maintenance action failed');
+      }
+
+      const resBox = document.getElementById('maintResultBox');
+      const resMsg = document.getElementById('maintResultMsg');
+      if (resBox && resMsg) {
+        resMsg.textContent = data.message || 'Cleanup operation completed successfully';
+        resBox.style.display = 'block';
+      }
+
+      this.toast(data.message || 'Cleanup completed successfully', 'success');
+
+      await this.loadMaintenanceStatus(false);
+      this.fetchStreams();
+      this.fetchChannels();
+    } catch (err) {
+      this.toast(err.message || 'Action failed', 'error');
+    } finally {
+      if (targetBtn) {
+        targetBtn.disabled = false;
+        targetBtn.innerHTML = originalHtml;
+        this.refreshIcons();
+      }
+    }
   },
 
   closeCredentialsModal(e) {

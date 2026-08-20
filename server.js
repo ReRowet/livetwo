@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const ffmpeg = require('fluent-ffmpeg');
 const multer = require('multer');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -1670,6 +1671,378 @@ app.post('/api/channels/:id/upload-audios', uploadAudiosMulter.array('audios'), 
   }
 
   res.status(201).json({ success: true, count: added.length, audios: added });
+});
+
+// ============================================================
+// System Maintenance Helpers & Endpoints
+// ============================================================
+
+function getOrphanUploads() {
+  const referencedFiles = new Set();
+  const channels = channelStore.list();
+  for (const c of channels) {
+    if (Array.isArray(c.videos)) {
+      for (const v of c.videos) {
+        if (v.filePath) referencedFiles.add(path.resolve(normalizeFilePath(v.filePath)).toLowerCase());
+        if (v.url) referencedFiles.add(path.resolve(path.join(__dirname, v.url.replace(/^\//, ''))).toLowerCase());
+        if (v.thumbnail) referencedFiles.add(path.resolve(path.join(__dirname, v.thumbnail.replace(/^\//, ''))).toLowerCase());
+      }
+    }
+    if (Array.isArray(c.audios)) {
+      for (const a of c.audios) {
+        if (a.filePath) referencedFiles.add(path.resolve(normalizeFilePath(a.filePath)).toLowerCase());
+        if (a.url) referencedFiles.add(path.resolve(path.join(__dirname, a.url.replace(/^\//, ''))).toLowerCase());
+      }
+    }
+  }
+
+  // Check streams
+  for (const [, s] of manager.streams) {
+    if (s.thumbnail) referencedFiles.add(path.resolve(path.join(__dirname, s.thumbnail.replace(/^\//, ''))).toLowerCase());
+    if (s.videoPath) {
+      const vResolved = normalizeFilePath(s.videoPath);
+      if (vResolved) referencedFiles.add(path.resolve(vResolved).toLowerCase());
+    }
+    if (s.audioPath) {
+      const aResolved = normalizeFilePath(s.audioPath);
+      if (aResolved) referencedFiles.add(path.resolve(aResolved).toLowerCase());
+    }
+  }
+
+  const orphanFiles = [];
+  let totalOrphanBytes = 0;
+  const targetDirs = [UPLOADS_VIDEOS_DIR, UPLOADS_AUDIOS_DIR, UPLOADS_THUMBS_DIR];
+
+  for (const dir of targetDirs) {
+    if (!fs.existsSync(dir)) continue;
+    try {
+      const files = fs.readdirSync(dir);
+      for (const file of files) {
+        if (file === '.gitkeep') continue;
+        const fullPath = path.join(dir, file);
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.isFile()) {
+            const absLower = path.resolve(fullPath).toLowerCase();
+            if (!referencedFiles.has(absLower)) {
+              orphanFiles.push({
+                path: fullPath,
+                name: file,
+                dir: path.basename(dir),
+                size: stat.size
+              });
+              totalOrphanBytes += stat.size;
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  return { orphanFiles, totalOrphanBytes };
+}
+
+function getTempCacheInfo() {
+  const activeStreamIds = new Set();
+  for (const [, s] of manager.streams) {
+    if (s.status === 'live' || s.status === 'retrying') {
+      activeStreamIds.add(s.id);
+    }
+  }
+
+  const tempFiles = [];
+  let totalTempBytes = 0;
+
+  // 1. Playlists directory (.txt files)
+  if (fs.existsSync(PLAYLISTS_DIR)) {
+    try {
+      const files = fs.readdirSync(PLAYLISTS_DIR);
+      for (const file of files) {
+        if (file === '.gitkeep') continue;
+        if (file.endsWith('.txt')) {
+          const streamIdMatch = file.match(/^(?:video|audio)_(.+)\.txt$/i);
+          const isBelongsToActiveStream = streamIdMatch && activeStreamIds.has(streamIdMatch[1]);
+          if (!isBelongsToActiveStream) {
+            const fullPath = path.join(PLAYLISTS_DIR, file);
+            try {
+              const stat = fs.statSync(fullPath);
+              if (stat.isFile()) {
+                tempFiles.push({ path: fullPath, name: file, type: 'playlist_concat', size: stat.size });
+                totalTempBytes += stat.size;
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Logs directory (.log files of stopped/idle streams)
+  if (fs.existsSync(LOGS_DIR)) {
+    try {
+      const files = fs.readdirSync(LOGS_DIR);
+      for (const file of files) {
+        if (file === '.gitkeep') continue;
+        if (file.endsWith('.log')) {
+          const streamId = file.replace(/\.log$/, '');
+          const isBelongsToActiveStream = activeStreamIds.has(streamId);
+          if (!isBelongsToActiveStream) {
+            const fullPath = path.join(LOGS_DIR, file);
+            try {
+              const stat = fs.statSync(fullPath);
+              if (stat.isFile()) {
+                tempFiles.push({ path: fullPath, name: file, type: 'log', size: stat.size });
+                totalTempBytes += stat.size;
+              }
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  return { tempFiles, totalTempBytes };
+}
+
+async function getZombieProcesses() {
+  const activePids = new Set();
+  for (const [, s] of manager.streams) {
+    if (s.status === 'live' || s.status === 'retrying') {
+      if (s.pid) activePids.add(Number(s.pid));
+      if (s.proc && s.proc.pid) activePids.add(Number(s.proc.pid));
+    }
+  }
+
+  const zombieProcesses = [];
+  try {
+    const procs = await si.processes();
+    if (procs && Array.isArray(procs.list)) {
+      for (const p of procs.list) {
+        const name = (p.name || '').toLowerCase();
+        const cmd = (p.command || '').toLowerCase();
+        if (name.includes('ffmpeg') || name.includes('ffprobe') || cmd.includes('ffmpeg')) {
+          if (!activePids.has(Number(p.pid))) {
+            zombieProcesses.push({
+              pid: p.pid,
+              name: p.name,
+              cpu: p.cpu || 0,
+              mem: p.mem || 0,
+              command: p.command || ''
+            });
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to get processes for zombie check:', err.message);
+  }
+
+  return { zombieProcesses, activePidsCount: activePids.size };
+}
+
+// GET /api/system/maintenance/status
+app.get('/api/system/maintenance/status', authenticateToken, async (req, res) => {
+  try {
+    const orphanInfo = getOrphanUploads();
+    const cacheInfo = getTempCacheInfo();
+    const zombieInfo = await getZombieProcesses();
+
+    res.json({
+      success: true,
+      orphanUploads: {
+        count: orphanInfo.orphanFiles.length,
+        totalBytes: orphanInfo.totalOrphanBytes,
+        totalFormatted: (orphanInfo.totalOrphanBytes / (1024 * 1024)).toFixed(2) + ' MB'
+      },
+      cache: {
+        count: cacheInfo.tempFiles.length,
+        totalBytes: cacheInfo.totalTempBytes,
+        totalFormatted: (cacheInfo.totalTempBytes / (1024 * 1024)).toFixed(2) + ' MB'
+      },
+      zombies: {
+        count: zombieInfo.zombieProcesses.length,
+        processes: zombieInfo.zombieProcesses
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/system/maintenance/clean-cache
+app.post('/api/system/maintenance/clean-cache', authenticateToken, (req, res) => {
+  try {
+    const { tempFiles, totalTempBytes } = getTempCacheInfo();
+    let deletedCount = 0;
+    let freedBytes = 0;
+
+    for (const f of tempFiles) {
+      try {
+        if (fs.existsSync(f.path)) {
+          fs.unlinkSync(f.path);
+          deletedCount++;
+          freedBytes += f.size;
+        }
+      } catch (_) {}
+    }
+
+    res.json({
+      success: true,
+      message: `Cache cleaned: ${deletedCount} temporary file(s) removed`,
+      deletedCount,
+      freedBytes,
+      freedFormatted: (freedBytes / (1024 * 1024)).toFixed(2) + ' MB'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/system/maintenance/clean-zombies
+app.post('/api/system/maintenance/clean-zombies', authenticateToken, async (req, res) => {
+  try {
+    const { zombieProcesses } = await getZombieProcesses();
+    let killedCount = 0;
+
+    for (const zp of zombieProcesses) {
+      try {
+        if (os.platform() === 'win32') {
+          spawn('taskkill', ['/pid', String(zp.pid), '/f', '/t'], { stdio: 'ignore' });
+        } else {
+          process.kill(zp.pid, 'SIGKILL');
+        }
+        killedCount++;
+      } catch (_) {}
+    }
+
+    let syncedStreams = 0;
+    for (const [, s] of manager.streams) {
+      if ((s.status === 'live' || s.status === 'retrying') && (!s.proc || !s.proc.pid)) {
+        s.status = 'idle';
+        s.startTime = null;
+        s.pid = null;
+        syncedStreams++;
+      }
+    }
+    if (syncedStreams > 0) {
+      manager._broadcastStatus();
+    }
+
+    res.json({
+      success: true,
+      message: `Terminated ${killedCount} orphan FFmpeg process(es)${syncedStreams > 0 ? `, synced ${syncedStreams} stream status` : ''}`,
+      killedCount,
+      syncedStreams
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/system/maintenance/clean-uploads
+app.post('/api/system/maintenance/clean-uploads', authenticateToken, (req, res) => {
+  try {
+    const { orphanFiles } = getOrphanUploads();
+    let deletedCount = 0;
+    let freedBytes = 0;
+
+    for (const ofile of orphanFiles) {
+      try {
+        if (fs.existsSync(ofile.path)) {
+          fs.unlinkSync(ofile.path);
+          deletedCount++;
+          freedBytes += ofile.size;
+        }
+      } catch (_) {}
+    }
+
+    res.json({
+      success: true,
+      message: `Cleaned ${deletedCount} unreferenced upload files`,
+      deletedCount,
+      freedBytes,
+      freedFormatted: (freedBytes / (1024 * 1024)).toFixed(2) + ' MB'
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/system/maintenance/clean-all
+app.post('/api/system/maintenance/clean-all', authenticateToken, async (req, res) => {
+  try {
+    // 1. Clean Cache
+    const { tempFiles } = getTempCacheInfo();
+    let cacheDeleted = 0;
+    let cacheFreedBytes = 0;
+    for (const f of tempFiles) {
+      try {
+        if (fs.existsSync(f.path)) {
+          fs.unlinkSync(f.path);
+          cacheDeleted++;
+          cacheFreedBytes += f.size;
+        }
+      } catch (_) {}
+    }
+
+    // 2. Clean Zombies
+    const { zombieProcesses } = await getZombieProcesses();
+    let killedZombies = 0;
+    for (const zp of zombieProcesses) {
+      try {
+        if (os.platform() === 'win32') {
+          spawn('taskkill', ['/pid', String(zp.pid), '/f', '/t'], { stdio: 'ignore' });
+        } else {
+          process.kill(zp.pid, 'SIGKILL');
+        }
+        killedZombies++;
+      } catch (_) {}
+    }
+
+    // Sync stream status
+    let syncedStreams = 0;
+    for (const [, s] of manager.streams) {
+      if ((s.status === 'live' || s.status === 'retrying') && (!s.proc || !s.proc.pid)) {
+        s.status = 'idle';
+        s.startTime = null;
+        s.pid = null;
+        syncedStreams++;
+      }
+    }
+    if (syncedStreams > 0) manager._broadcastStatus();
+
+    // 3. Clean Orphan Uploads
+    const { orphanFiles } = getOrphanUploads();
+    let uploadsDeleted = 0;
+    let uploadsFreedBytes = 0;
+    for (const ofile of orphanFiles) {
+      try {
+        if (fs.existsSync(ofile.path)) {
+          fs.unlinkSync(ofile.path);
+          uploadsDeleted++;
+          uploadsFreedBytes += ofile.size;
+        }
+      } catch (_) {}
+    }
+
+    const totalFreedBytes = cacheFreedBytes + uploadsFreedBytes;
+    const totalFreedMb = (totalFreedBytes / (1024 * 1024)).toFixed(2) + ' MB';
+
+    res.json({
+      success: true,
+      summary: {
+        cacheDeleted,
+        killedZombies,
+        uploadsDeleted,
+        syncedStreams,
+        totalFreedBytes,
+        totalFreedMb
+      },
+      message: `Deep Clean Finished: ${uploadsDeleted + cacheDeleted} files removed (${totalFreedMb} freed), ${killedZombies} zombie process(es) terminated.`
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.get('/', (req, res) => {
