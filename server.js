@@ -1022,10 +1022,10 @@ class StreamManager {
         if (isVideoPlaylistMode) {
           command.input(videoPlaylist)
             .inputOptions([
-              '-hwaccel', 'auto',
               '-loglevel', 'info',
               '-fflags', '+genpts+igndts',
               '-avoid_negative_ts', 'make_zero',
+              '-re',
               '-f', 'concat',
               '-safe', '0',
               '-stream_loop', '-1'
@@ -1033,10 +1033,10 @@ class StreamManager {
         } else {
           command.input(videos[0])
             .inputOptions([
-              '-hwaccel', 'auto',
               '-loglevel', 'info',
               '-fflags', '+genpts+igndts',
               '-avoid_negative_ts', 'make_zero',
+              '-re',
               '-stream_loop', '-1'
             ]);
         }
