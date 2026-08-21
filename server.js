@@ -866,59 +866,68 @@ class StreamManager {
   async start(id) {
     const s = this.streams.get(id);
     if (!s) return { error: 'Stream not found' };
-    if (s.status !== 'idle') return { error: 'Already running' };
+    if (s.status !== 'idle' || s._starting) return { error: 'Already running or starting' };
     if (!s.streamKey) return { error: 'Stream key is empty' };
     if (!s.videoPath) return { error: 'Video path is empty' };
 
-    const videos = this._resolveFiles(s.videoPath, ['.mp4', '.avi', '.mkv', '.mov', '.flv', '.webm', '.ts']);
-    if (videos.length === 0) return { error: `No video files found in: ${s.videoPath}` };
+    s._starting = true;
+    try {
+      const videos = this._resolveFiles(s.videoPath, ['.mp4', '.avi', '.mkv', '.mov', '.flv', '.webm', '.ts']);
+      if (videos.length === 0) return { error: `No video files found in: ${s.videoPath}` };
 
-    let audios = [];
-    if (s.audioPath) {
-      audios = this._resolveFiles(s.audioPath, ['.mp3', '.aac', '.wav', '.m4a', '.ogg', '.flac', '.mp4']);
-    }
-
-    s.type = (videos.length > 1 || audios.length > 1) ? 'Concat' : 'Single';
-
-    let rtmpUrl;
-    if (s.rtmpUrl) {
-      if (s.rtmpUrl.includes('?')) {
-        const [baseUrl, query] = s.rtmpUrl.split('?');
-        rtmpUrl = `${baseUrl.replace(/\/+$/, '')}/${s.streamKey}?${query}`;
-      } else {
-        rtmpUrl = `${s.rtmpUrl.replace(/\/+$/, '')}/${s.streamKey}`;
+      let audios = [];
+      if (s.audioPath) {
+        audios = this._resolveFiles(s.audioPath, ['.mp3', '.aac', '.wav', '.m4a', '.ogg', '.flac', '.mp4']);
       }
-    } else {
-      rtmpUrl = `rtmp://a.rtmp.youtube.com/live2/${s.streamKey}`;
-    }
 
-    const videoPlaylist = await this._buildPlaylist(
-      videos,
-      s.videoMode,
-      path.join(PLAYLISTS_DIR, `video_${s.id}.txt`),
-      s.videoLoop1Hour === true
-    );
-    let audioPlaylist = null;
-    if (audios.length > 0) {
-      audioPlaylist = await this._buildPlaylist(
-        audios,
-        s.audioMode,
-        path.join(PLAYLISTS_DIR, `audio_${s.id}.txt`),
-        false
+      s.type = (videos.length > 1 || audios.length > 1) ? 'Concat' : 'Single';
+
+      let rtmpUrl;
+      if (s.rtmpUrl) {
+        if (s.rtmpUrl.includes('?')) {
+          const [baseUrl, query] = s.rtmpUrl.split('?');
+          rtmpUrl = `${baseUrl.replace(/\/+$/, '')}/${s.streamKey}?${query}`;
+        } else {
+          rtmpUrl = `${s.rtmpUrl.replace(/\/+$/, '')}/${s.streamKey}`;
+        }
+      } else {
+        rtmpUrl = `rtmp://a.rtmp.youtube.com/live2/${s.streamKey}`;
+      }
+
+      const videoPlaylist = await this._buildPlaylist(
+        videos,
+        s.videoMode,
+        path.join(PLAYLISTS_DIR, `video_${s.id}.txt`),
+        s.videoLoop1Hour === true
       );
+      let audioPlaylist = null;
+      if (audios.length > 0) {
+        audioPlaylist = await this._buildPlaylist(
+          audios,
+          s.audioMode,
+          path.join(PLAYLISTS_DIR, `audio_${s.id}.txt`),
+          false
+        );
+      }
+
+      s.activeInstanceId = 'inst_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      s.status = 'live';
+      s.startTime = Date.now();
+      s.retryCount = 0;
+      s._stopRequested = false;
+      s.logs = [];
+
+      this._log(s, `Streaming started. ${videos.length} video(s), ${audios.length} audio(s).`, 'success');
+      this._streamingLoop(s, rtmpUrl, videoPlaylist, audioPlaylist, videos, audios);
+
+      this._broadcastStatus();
+      return this._toPublic(s);
+    } catch (err) {
+      this._log(s, `Start failed: ${err.message}`, 'error');
+      return { error: err.message };
+    } finally {
+      s._starting = false;
     }
-
-    s.status = 'live';
-    s.startTime = Date.now();
-    s.retryCount = 0;
-    s._stopRequested = false;
-    s.logs = [];
-
-    this._log(s, `Streaming started. ${videos.length} video(s), ${audios.length} audio(s).`, 'success');
-    this._streamingLoop(s, rtmpUrl, videoPlaylist, audioPlaylist, videos, audios);
-
-    this._broadcastStatus();
-    return this._toPublic(s);
   }
 
   stop(id) {
@@ -983,6 +992,7 @@ class StreamManager {
 
   _stopInternal(s) {
     s._stopRequested = true;
+    s.activeInstanceId = null;
     if (s.commandInstance) {
       try { s.commandInstance.kill('SIGKILL'); } catch (_) {}
       s.commandInstance = null;
@@ -1004,7 +1014,8 @@ class StreamManager {
   }
 
   async _streamingLoop(s, rtmpUrl, videoPlaylist, audioPlaylist, videos, audios) {
-    while (!s._stopRequested) {
+    const myInstanceId = s.activeInstanceId;
+    while (!s._stopRequested && s.activeInstanceId === myInstanceId) {
       try {
         if (s.retryCount > 0) {
           await this._buildPlaylist(videos, s.videoMode, videoPlaylist, s.videoLoop1Hour === true);
@@ -1107,7 +1118,7 @@ class StreamManager {
           });
         });
 
-        if (s._stopRequested) return;
+        if (s._stopRequested || s.activeInstanceId !== myInstanceId) return;
 
         const elapsed = s.startTime ? (Date.now() - s.startTime) / 1000 : 0;
         if (elapsed > 30) s.retryCount = 0;
@@ -1123,7 +1134,7 @@ class StreamManager {
         await new Promise((resolve) => {
           const timer = setTimeout(resolve, delay * 1000);
           const checkStop = setInterval(() => {
-            if (s._stopRequested) {
+            if (s._stopRequested || s.activeInstanceId !== myInstanceId) {
               clearTimeout(timer);
               clearInterval(checkStop);
               resolve();
@@ -1131,16 +1142,16 @@ class StreamManager {
           }, 500);
         });
 
-        if (s._stopRequested) return;
+        if (s._stopRequested || s.activeInstanceId !== myInstanceId) return;
         s.startTime = Date.now();
 
       } catch (err) {
         this._log(s, `Error: ${err.message}`, 'error');
-        if (s._stopRequested) return;
+        if (s._stopRequested || s.activeInstanceId !== myInstanceId) return;
         s.retryCount++;
         const delay = Math.min(30, s.retryCount * 5);
         await new Promise(r => setTimeout(r, delay * 1000));
-        if (s._stopRequested) return;
+        if (s._stopRequested || s.activeInstanceId !== myInstanceId) return;
       }
     }
   }
