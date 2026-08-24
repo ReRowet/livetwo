@@ -365,6 +365,43 @@ function getMediaDuration(filePath) {
   });
 }
 
+function getMediaDurationInSeconds(filePath) {
+  return new Promise((resolve) => {
+    const safePath = normalizeFilePath(filePath);
+    if (!safePath || !fs.existsSync(safePath)) return resolve(0);
+    ffmpeg.ffprobe(safePath, (err, metadata) => {
+      if (err || !metadata || !metadata.format || !metadata.format.duration) {
+        return resolve(0);
+      }
+      resolve(Math.max(0, Math.floor(metadata.format.duration)));
+    });
+  });
+}
+
+function parseTimemarkToSeconds(timemark) {
+  if (!timemark || typeof timemark !== 'string') return 0;
+  const parts = timemark.split(':');
+  if (parts.length === 3) {
+    const h = parseFloat(parts[0]) || 0;
+    const m = parseFloat(parts[1]) || 0;
+    const s = parseFloat(parts[2]) || 0;
+    return h * 3600 + m * 60 + s;
+  } else if (parts.length === 2) {
+    const m = parseFloat(parts[0]) || 0;
+    const s = parseFloat(parts[1]) || 0;
+    return m * 60 + s;
+  }
+  return parseFloat(timemark) || 0;
+}
+
+function formatSecondsToTimemark(sec) {
+  const totalSec = Math.floor(sec || 0);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
 // ============================================================
 // Channel Manager
 // ============================================================
@@ -894,31 +931,54 @@ class StreamManager {
         rtmpUrl = `rtmp://a.rtmp.youtube.com/live2/${s.streamKey}`;
       }
 
-      const videoPlaylist = await this._buildPlaylist(
-        videos,
-        s.videoMode,
-        path.join(PLAYLISTS_DIR, `video_${s.id}.txt`),
-        s.videoLoop1Hour === true
-      );
-      let audioPlaylist = null;
-      if (audios.length > 0) {
-        audioPlaylist = await this._buildPlaylist(
-          audios,
-          s.audioMode,
-          path.join(PLAYLISTS_DIR, `audio_${s.id}.txt`),
-          false
+      const isVideoPlaylistMode = (videos.length > 1 || s.videoMode === 'playlist' || (s.videoPath && s.videoPath.startsWith('pl_')));
+      const isAudioPlaylistMode = (audios.length > 1 || s.audioType === 'playlist' || (s.audioPath && (s.audioPath.startsWith('pl_') || s.audioPath.includes(','))));
+
+      let videoPlaylistPath = null;
+      let totalVideoDuration = 0;
+      if (isVideoPlaylistMode) {
+        const vpRes = await this._buildPlaylist(
+          videos,
+          s.videoMode,
+          path.join(PLAYLISTS_DIR, `video_${s.id}.txt`),
+          s.videoLoop1Hour === true
         );
+        videoPlaylistPath = vpRes.path;
+        totalVideoDuration = vpRes.totalDurationSec;
+      } else {
+        totalVideoDuration = await getMediaDurationInSeconds(videos[0]);
+      }
+
+      let audioPlaylistPath = null;
+      let totalAudioDuration = 0;
+      if (audios.length > 0) {
+        if (isAudioPlaylistMode) {
+          const apRes = await this._buildPlaylist(
+            audios,
+            s.audioMode,
+            path.join(PLAYLISTS_DIR, `audio_${s.id}.txt`),
+            false
+          );
+          audioPlaylistPath = apRes.path;
+          totalAudioDuration = apRes.totalDurationSec;
+        } else {
+          totalAudioDuration = await getMediaDurationInSeconds(audios[0]);
+        }
       }
 
       s.activeInstanceId = 'inst_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       s.status = 'live';
       s.startTime = Date.now();
       s.retryCount = 0;
+      s.lastPlaybackSeconds = 0;
+      s._seekOffsetSec = 0;
+      s.totalVideoDuration = totalVideoDuration;
+      s.totalAudioDuration = totalAudioDuration;
       s._stopRequested = false;
       s.logs = [];
 
-      this._log(s, `Streaming started. ${videos.length} video(s), ${audios.length} audio(s).`, 'success');
-      this._streamingLoop(s, rtmpUrl, videoPlaylist, audioPlaylist, videos, audios);
+      this._log(s, `Streaming started. ${videos.length} video(s), ${audios.length} audio(s). Length: ${formatSecondsToTimemark(totalVideoDuration)}`, 'success');
+      this._streamingLoop(s, rtmpUrl, videoPlaylistPath, audioPlaylistPath, videos, audios);
 
       this._broadcastStatus();
       return this._toPublic(s);
@@ -1011,54 +1071,91 @@ class StreamManager {
     s.startTime = null;
     s.retryCount = 0;
     s.pid = null;
+    s.lastPlaybackSeconds = 0;
+    s._seekOffsetSec = 0;
   }
 
   async _streamingLoop(s, rtmpUrl, videoPlaylist, audioPlaylist, videos, audios) {
     const myInstanceId = s.activeInstanceId;
     while (!s._stopRequested && s.activeInstanceId === myInstanceId) {
       try {
-        if (s.retryCount > 0) {
-          await this._buildPlaylist(videos, s.videoMode, videoPlaylist, s.videoLoop1Hour === true);
-          if (audios.length > 0) {
-            await this._buildPlaylist(audios, s.audioMode, audioPlaylist, false);
-          }
-          this._log(s, `Playlist rebuilt (${s.videoMode}, 1H loop: ${s.videoLoop1Hour ? 'yes' : 'no'}): ${videos.length} video(s)`, 'info');
-        }
-
         const isVideoPlaylistMode = (videos.length > 1 || s.videoMode === 'playlist' || (s.videoPath && s.videoPath.startsWith('pl_')));
         const isAudioPlaylistMode = (audios.length > 1 || s.audioType === 'playlist' || (s.audioPath && (s.audioPath.startsWith('pl_') || s.audioPath.includes(','))));
+
+        // Calculate seek offset on reconnect
+        const totalVideoDuration = s.totalVideoDuration || 0;
+        const totalAudioDuration = s.totalAudioDuration || 0;
+        let videoSeekSec = 0;
+        let audioSeekSec = 0;
+
+        if (s.lastPlaybackSeconds > 0) {
+          if (totalVideoDuration > 0) {
+            videoSeekSec = s.lastPlaybackSeconds % totalVideoDuration;
+          } else {
+            videoSeekSec = s.lastPlaybackSeconds;
+          }
+
+          if (audios.length > 0) {
+            if (totalAudioDuration > 0) {
+              audioSeekSec = s.lastPlaybackSeconds % totalAudioDuration;
+            } else {
+              audioSeekSec = s.lastPlaybackSeconds;
+            }
+          }
+
+          this._log(
+            s,
+            `Resuming playback from ${formatSecondsToTimemark(videoSeekSec)} (total streamed: ${formatSecondsToTimemark(s.lastPlaybackSeconds)})`,
+            'info'
+          );
+        }
+
+        // Set base offset for this FFmpeg process instance
+        s._seekOffsetSec = s.lastPlaybackSeconds || 0;
 
         let command = ffmpeg();
 
         if (isVideoPlaylistMode) {
-          command.input(videoPlaylist)
-            .inputOptions([
-              '-loglevel', 'info',
-              '-fflags', '+genpts+igndts',
-              '-avoid_negative_ts', 'make_zero',
-              '-re',
-              '-f', 'concat',
-              '-safe', '0',
-              '-stream_loop', '-1'
-            ]);
+          const videoInputOpts = [
+            '-loglevel', 'info',
+            '-fflags', '+genpts+igndts',
+            '-avoid_negative_ts', 'make_zero',
+            '-re',
+            '-f', 'concat',
+            '-safe', '0',
+            '-stream_loop', '-1'
+          ];
+          if (videoSeekSec > 0.5) {
+            videoInputOpts.unshift('-ss', String(Math.floor(videoSeekSec)));
+          }
+          command.input(videoPlaylist).inputOptions(videoInputOpts);
         } else {
-          command.input(videos[0])
-            .inputOptions([
-              '-loglevel', 'info',
-              '-fflags', '+genpts+igndts',
-              '-avoid_negative_ts', 'make_zero',
-              '-re',
-              '-stream_loop', '-1'
-            ]);
+          const videoInputOpts = [
+            '-loglevel', 'info',
+            '-fflags', '+genpts+igndts',
+            '-avoid_negative_ts', 'make_zero',
+            '-re',
+            '-stream_loop', '-1'
+          ];
+          if (videoSeekSec > 0.5) {
+            videoInputOpts.unshift('-ss', String(Math.floor(videoSeekSec)));
+          }
+          command.input(videos[0]).inputOptions(videoInputOpts);
         }
 
         if (audios.length > 0) {
           if (isAudioPlaylistMode) {
-            command.input(audioPlaylist)
-              .inputOptions(['-re', '-f', 'concat', '-safe', '0', '-stream_loop', '-1']);
+            const audioInputOpts = ['-re', '-f', 'concat', '-safe', '0', '-stream_loop', '-1'];
+            if (audioSeekSec > 0.5) {
+              audioInputOpts.unshift('-ss', String(Math.floor(audioSeekSec)));
+            }
+            command.input(audioPlaylist).inputOptions(audioInputOpts);
           } else {
-            command.input(audios[0])
-              .inputOptions(['-re', '-stream_loop', '-1']);
+            const audioInputOpts = ['-re', '-stream_loop', '-1'];
+            if (audioSeekSec > 0.5) {
+              audioInputOpts.unshift('-ss', String(Math.floor(audioSeekSec)));
+            }
+            command.input(audios[0]).inputOptions(audioInputOpts);
           }
           command.outputOptions(['-map', '0:v:0', '-map', '1:a:0']);
         } else {
@@ -1085,9 +1182,16 @@ class StreamManager {
             }
           })
           .on('progress', (progress) => {
+            if (progress.timemark) {
+              const currentProcSec = parseTimemarkToSeconds(progress.timemark);
+              if (currentProcSec > 0) {
+                s.lastPlaybackSeconds = (s._seekOffsetSec || 0) + currentProcSec;
+              }
+            }
             const now = Date.now();
             if (now - lastProgress >= 10000) {
-              this._log(s, `frame=${progress.frames || 0} fps=${progress.currentFps || 0} time=${progress.timemark || '00:00:00'} kbps=${progress.currentKbps || 0}`, 'info');
+              const currentPosFormatted = formatSecondsToTimemark(s.lastPlaybackSeconds || 0);
+              this._log(s, `frame=${progress.frames || 0} fps=${progress.currentFps || 0} time=${progress.timemark || '00:00:00'} (total=${currentPosFormatted}) kbps=${progress.currentKbps || 0}`, 'info');
               lastProgress = now;
             }
           })
@@ -1128,7 +1232,7 @@ class StreamManager {
         s.pid = null;
 
         const delay = Math.min(30, s.retryCount * 5);
-        this._log(s, `FFmpeg exited (code ${exitCode}). Retrying in ${delay}s...`, 'error');
+        this._log(s, `FFmpeg exited (code ${exitCode}). Retrying in ${delay}s... (position: ${formatSecondsToTimemark(s.lastPlaybackSeconds || 0)})`, 'error');
         this._broadcastStatus();
 
         await new Promise((resolve) => {
@@ -1216,24 +1320,25 @@ class StreamManager {
     }
 
     const lines = [];
+    let totalDurationSec = 0;
     for (const f of ordered) {
       const sanitized = f.replace(/\\/g, '/').replace(/'/g, "'\\''");
+      const sec = await getMediaDurationInSeconds(f);
+      const safeSec = sec > 0 ? sec : 5;
       if (loop1Hour) {
-        const durFormatted = await getMediaDuration(f);
-        const parts = durFormatted.split(':').map(Number);
-        let sec = (parts.length === 2) ? (parts[0] * 60 + parts[1]) : 5;
-        if (sec <= 0) sec = 5;
-        const repeats = Math.max(1, Math.ceil(3600 / sec));
+        const repeats = Math.max(1, Math.ceil(3600 / safeSec));
         for (let r = 0; r < repeats; r++) {
           lines.push(`file '${sanitized}'`);
         }
+        totalDurationSec += (safeSec * repeats);
       } else {
         lines.push(`file '${sanitized}'`);
+        totalDurationSec += safeSec;
       }
     }
 
     fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8');
-    return outputPath;
+    return { path: outputPath, totalDurationSec };
   }
 
   _log(s, message, level = 'info') {
@@ -1292,6 +1397,7 @@ class StreamManager {
       startTime: s.startTime,
       retryCount: s.retryCount,
       pid: s.pid,
+      lastPlaybackSeconds: s.lastPlaybackSeconds || 0,
     };
   }
 
