@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const si = require('systeminformation');
 
 const app = express();
@@ -1417,8 +1418,27 @@ class StreamManager {
 const manager = new StreamManager();
 
 // ============================================================
-// API Routes: AUTHENTICATION (Direct comparison with .env)
 // ============================================================
+// API Routes: AUTHENTICATION (Bcrypt Hashing & JWT Validation)
+// ============================================================
+
+// Secure Password Verification (supports bcrypt hash and fallback to plain text)
+function verifyPassword(plainPassword, storedPassword) {
+  if (!plainPassword || !storedPassword) return false;
+  if (typeof storedPassword === 'string' && (storedPassword.startsWith('$2a$') || storedPassword.startsWith('$2b$') || storedPassword.startsWith('$2y$'))) {
+    try {
+      return bcrypt.compareSync(plainPassword, storedPassword);
+    } catch (_) {
+      return false;
+    }
+  }
+  return plainPassword === storedPassword;
+}
+
+function hashPassword(password) {
+  if (!password) return '';
+  return bcrypt.hashSync(password, 10);
+}
 
 // POST /api/auth/login
 app.post('/api/auth/login', (req, res) => {
@@ -1430,8 +1450,8 @@ app.post('/api/auth/login', (req, res) => {
   const validUsername = process.env.AUTH_USERNAME || 'admin';
   const validPassword = process.env.AUTH_PASSWORD || 'admin123';
 
-  // Direct comparison with .env without hashing
-  if (username !== validUsername || password !== validPassword) {
+  // Secure comparison with bcrypt verification
+  if (username !== validUsername || !verifyPassword(password, validPassword)) {
     return res.status(401).json({ error: 'Invalid username or password' });
   }
 
@@ -1520,12 +1540,19 @@ app.put('/api/auth/credentials', authenticateToken, (req, res) => {
   const currentEnvPassword = process.env.AUTH_PASSWORD || 'admin123';
   const currentEnvUsername = process.env.AUTH_USERNAME || 'admin';
 
-  if (!currentPassword || currentPassword !== currentEnvPassword) {
+  if (!currentPassword || !verifyPassword(currentPassword, currentEnvPassword)) {
     return res.status(400).json({ error: 'Current password is incorrect.' });
   }
 
   const updatedUsername = (newUsername && newUsername.trim()) ? newUsername.trim() : currentEnvUsername;
-  const updatedPassword = (newPassword && newPassword.trim()) ? newPassword.trim() : currentEnvPassword;
+  let updatedPassword = currentEnvPassword;
+
+  if (newPassword && newPassword.trim()) {
+    if (newPassword.trim().length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+    }
+    updatedPassword = hashPassword(newPassword.trim());
+  }
 
   process.env.AUTH_USERNAME = updatedUsername;
   process.env.AUTH_PASSWORD = updatedPassword;
@@ -1536,7 +1563,7 @@ app.put('/api/auth/credentials', authenticateToken, (req, res) => {
 
   res.json({
     success: true,
-    message: 'Credentials updated successfully'
+    message: 'Credentials updated and securely encrypted successfully'
   });
 });
 
