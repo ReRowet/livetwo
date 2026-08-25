@@ -1123,6 +1123,7 @@ class StreamManager {
         command.outputOptions([
           '-c:v', 'copy',
           '-c:a', 'copy',
+          '-rtmp_buffer', '3000',
           '-max_muxing_queue_size', '4096',
           '-f', 'flv',
           '-flvflags', 'no_duration_filesize'
