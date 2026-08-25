@@ -1119,8 +1119,7 @@ class StreamManager {
         if (isVideoPlaylistMode) {
           const videoInputOpts = [
             '-loglevel', 'info',
-            '-fflags', '+genpts+igndts',
-            '-avoid_negative_ts', 'make_zero',
+            '-fflags', '+genpts+igndts+discardcorrupt',
             '-re',
             '-f', 'concat',
             '-safe', '0',
@@ -1133,8 +1132,7 @@ class StreamManager {
         } else {
           const videoInputOpts = [
             '-loglevel', 'info',
-            '-fflags', '+genpts+igndts',
-            '-avoid_negative_ts', 'make_zero',
+            '-fflags', '+genpts+igndts+discardcorrupt',
             '-re',
             '-stream_loop', '-1'
           ];
@@ -1166,6 +1164,7 @@ class StreamManager {
         command.outputOptions([
           '-c:v', 'copy',
           '-c:a', 'copy',
+          '-avoid_negative_ts', 'make_zero',
           '-max_muxing_queue_size', '4096',
           '-f', 'flv',
           '-flvflags', 'no_duration_filesize'
