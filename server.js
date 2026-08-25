@@ -1083,78 +1083,37 @@ class StreamManager {
         const isVideoPlaylistMode = (videos.length > 1 || s.videoMode === 'playlist' || (s.videoPath && s.videoPath.startsWith('pl_')));
         const isAudioPlaylistMode = (audios.length > 1 || s.audioType === 'playlist' || (s.audioPath && (s.audioPath.startsWith('pl_') || s.audioPath.includes(','))));
 
-        // Calculate seek offset on reconnect
-        const totalVideoDuration = s.totalVideoDuration || 0;
-        const totalAudioDuration = s.totalAudioDuration || 0;
-        let videoSeekSec = 0;
-        let audioSeekSec = 0;
-
-        if (s.lastPlaybackSeconds > 0) {
-          if (totalVideoDuration > 0) {
-            videoSeekSec = s.lastPlaybackSeconds % totalVideoDuration;
-          } else {
-            videoSeekSec = s.lastPlaybackSeconds;
-          }
-
-          if (audios.length > 0) {
-            if (totalAudioDuration > 0) {
-              audioSeekSec = s.lastPlaybackSeconds % totalAudioDuration;
-            } else {
-              audioSeekSec = s.lastPlaybackSeconds;
-            }
-          }
-
-          this._log(
-            s,
-            `Resuming playback from ${formatSecondsToTimemark(videoSeekSec)} (total streamed: ${formatSecondsToTimemark(s.lastPlaybackSeconds)})`,
-            'info'
-          );
-        }
-
-        // Set base offset for this FFmpeg process instance
-        s._seekOffsetSec = s.lastPlaybackSeconds || 0;
-
         let command = ffmpeg();
 
         if (isVideoPlaylistMode) {
-          const videoInputOpts = [
-            '-loglevel', 'info',
-            '-fflags', '+genpts+igndts+discardcorrupt',
-            '-re',
-            '-f', 'concat',
-            '-safe', '0',
-            '-stream_loop', '-1'
-          ];
-          if (videoSeekSec > 0.5) {
-            videoInputOpts.unshift('-ss', String(Math.floor(videoSeekSec)));
-          }
-          command.input(videoPlaylist).inputOptions(videoInputOpts);
+          command.input(videoPlaylist)
+            .inputOptions([
+              '-loglevel', 'info',
+              '-fflags', '+genpts+igndts',
+              '-avoid_negative_ts', 'make_zero',
+              '-re',
+              '-f', 'concat',
+              '-safe', '0',
+              '-stream_loop', '-1'
+            ]);
         } else {
-          const videoInputOpts = [
-            '-loglevel', 'info',
-            '-fflags', '+genpts+igndts+discardcorrupt',
-            '-re',
-            '-stream_loop', '-1'
-          ];
-          if (videoSeekSec > 0.5) {
-            videoInputOpts.unshift('-ss', String(Math.floor(videoSeekSec)));
-          }
-          command.input(videos[0]).inputOptions(videoInputOpts);
+          command.input(videos[0])
+            .inputOptions([
+              '-loglevel', 'info',
+              '-fflags', '+genpts+igndts',
+              '-avoid_negative_ts', 'make_zero',
+              '-re',
+              '-stream_loop', '-1'
+            ]);
         }
 
         if (audios.length > 0) {
           if (isAudioPlaylistMode) {
-            const audioInputOpts = ['-re', '-f', 'concat', '-safe', '0', '-stream_loop', '-1'];
-            if (audioSeekSec > 0.5) {
-              audioInputOpts.unshift('-ss', String(Math.floor(audioSeekSec)));
-            }
-            command.input(audioPlaylist).inputOptions(audioInputOpts);
+            command.input(audioPlaylist)
+              .inputOptions(['-re', '-f', 'concat', '-safe', '0', '-stream_loop', '-1']);
           } else {
-            const audioInputOpts = ['-re', '-stream_loop', '-1'];
-            if (audioSeekSec > 0.5) {
-              audioInputOpts.unshift('-ss', String(Math.floor(audioSeekSec)));
-            }
-            command.input(audios[0]).inputOptions(audioInputOpts);
+            command.input(audios[0])
+              .inputOptions(['-re', '-stream_loop', '-1']);
           }
           command.outputOptions(['-map', '0:v:0', '-map', '1:a:0']);
         } else {
@@ -1164,7 +1123,6 @@ class StreamManager {
         command.outputOptions([
           '-c:v', 'copy',
           '-c:a', 'copy',
-          '-avoid_negative_ts', 'make_zero',
           '-max_muxing_queue_size', '4096',
           '-f', 'flv',
           '-flvflags', 'no_duration_filesize'
@@ -1182,16 +1140,9 @@ class StreamManager {
             }
           })
           .on('progress', (progress) => {
-            if (progress.timemark) {
-              const currentProcSec = parseTimemarkToSeconds(progress.timemark);
-              if (currentProcSec > 0) {
-                s.lastPlaybackSeconds = (s._seekOffsetSec || 0) + currentProcSec;
-              }
-            }
             const now = Date.now();
             if (now - lastProgress >= 10000) {
-              const currentPosFormatted = formatSecondsToTimemark(s.lastPlaybackSeconds || 0);
-              this._log(s, `frame=${progress.frames || 0} fps=${progress.currentFps || 0} time=${progress.timemark || '00:00:00'} (total=${currentPosFormatted}) kbps=${progress.currentKbps || 0}`, 'info');
+              this._log(s, `frame=${progress.frames || 0} fps=${progress.currentFps || 0} time=${progress.timemark || '00:00:00'} kbps=${progress.currentKbps || 0}`, 'info');
               lastProgress = now;
             }
           })
@@ -1231,10 +1182,10 @@ class StreamManager {
         s.proc = null;
         s.pid = null;
 
-        // Ultra-fast sub-second retry: 300ms on first retry, 500ms on second, max 1000ms
+        // Fast sub-second retry: 300ms on first retry, 500ms on second, max 1000ms
         const delayMs = s.retryCount === 1 ? 300 : (s.retryCount === 2 ? 500 : 1000);
         const delayDisplay = (delayMs / 1000).toFixed(1);
-        this._log(s, `FFmpeg exited (code ${exitCode}). Retrying in ${delayDisplay}s... (position: ${formatSecondsToTimemark(s.lastPlaybackSeconds || 0)})`, 'error');
+        this._log(s, `FFmpeg exited (code ${exitCode}). Retrying in ${delayDisplay}s...`, 'error');
         this._broadcastStatus();
 
         await new Promise((resolve) => {
