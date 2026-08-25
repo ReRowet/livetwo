@@ -1231,19 +1231,21 @@ class StreamManager {
         s.proc = null;
         s.pid = null;
 
-        const delay = Math.min(30, s.retryCount * 5);
-        this._log(s, `FFmpeg exited (code ${exitCode}). Retrying in ${delay}s... (position: ${formatSecondsToTimemark(s.lastPlaybackSeconds || 0)})`, 'error');
+        // Ultra-fast sub-second retry: 300ms on first retry, 500ms on second, max 1000ms
+        const delayMs = s.retryCount === 1 ? 300 : (s.retryCount === 2 ? 500 : 1000);
+        const delayDisplay = (delayMs / 1000).toFixed(1);
+        this._log(s, `FFmpeg exited (code ${exitCode}). Retrying in ${delayDisplay}s... (position: ${formatSecondsToTimemark(s.lastPlaybackSeconds || 0)})`, 'error');
         this._broadcastStatus();
 
         await new Promise((resolve) => {
-          const timer = setTimeout(resolve, delay * 1000);
+          const timer = setTimeout(resolve, delayMs);
           const checkStop = setInterval(() => {
             if (s._stopRequested || s.activeInstanceId !== myInstanceId) {
               clearTimeout(timer);
               clearInterval(checkStop);
               resolve();
             }
-          }, 500);
+          }, 100);
         });
 
         if (s._stopRequested || s.activeInstanceId !== myInstanceId) return;
@@ -1253,8 +1255,8 @@ class StreamManager {
         this._log(s, `Error: ${err.message}`, 'error');
         if (s._stopRequested || s.activeInstanceId !== myInstanceId) return;
         s.retryCount++;
-        const delay = Math.min(30, s.retryCount * 5);
-        await new Promise(r => setTimeout(r, delay * 1000));
+        const delayMs = s.retryCount === 1 ? 300 : (s.retryCount === 2 ? 500 : 1000);
+        await new Promise(r => setTimeout(r, delayMs));
         if (s._stopRequested || s.activeInstanceId !== myInstanceId) return;
       }
     }
