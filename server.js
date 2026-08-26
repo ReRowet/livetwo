@@ -264,6 +264,9 @@ function convertAudioToAAC(inputPath, outputPath) {
       .on('end', () => resolve(outputPath))
       .on('error', (err) => reject(err))
       .run();
+  });
+}
+
 // Helper: Fast Merge Multiple Audio Files into a Single Track (for Playlists & Live Stream)
 function mergeAudioFiles(audioFilePaths, outputPath, mode = 'sequential') {
   return new Promise((resolve, reject) => {
