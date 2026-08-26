@@ -1147,9 +1147,12 @@ class StreamManager {
           singleAudioFile = audios[0];
           totalAudioDuration = await getMediaDurationInSeconds(audios[0]);
         } else {
-          // 1. Check if audioPath is a playlist ID that already has a valid pre-merged file and not in shuffle mode
+          // Auto-ensure stream audio playlist is created and linked in channelStore
+          await ensureStreamAudioPlaylist(s);
+
+          // 1. Check if audioPath is a playlist ID that already has a valid pre-merged file
           let preMerged = null;
-          if (s.audioPath && s.audioPath.startsWith('pl_') && s.audioMode !== 'shuffle') {
+          if (s.audioPath && s.audioPath.startsWith('pl_')) {
             for (const [, ch] of channelStore.channels) {
               const pl = (ch.audioPlaylists || []).find(p => p.id === s.audioPath);
               if (pl && pl.mergedFilePath) {
@@ -1164,71 +1167,16 @@ class StreamManager {
 
           if (preMerged) {
             singleAudioFile = preMerged;
-            this._log(s, `Using pre-merged playlist audio track: ${path.basename(singleAudioFile)}`, 'info');
+            this._log(s, `Using channel audio playlist: ${path.basename(singleAudioFile)}`, 'info');
           } else {
-            // Find target channel
-            let targetChannel = null;
-            for (const [, ch] of channelStore.channels) {
-              if (ch.name === s.channelName || ch.id === s.channelName) {
-                targetChannel = ch;
-                break;
-              }
-            }
-
-            if (targetChannel && s.audioMode !== 'shuffle') {
-              // Extract audio IDs from channel audios matching paths
-              const audioIds = [];
-              for (const aPath of audios) {
-                const found = (targetChannel.audios || []).find(a => normalizeFilePath(a.filePath || a.url) === aPath);
-                if (found) audioIds.push(found.id);
-              }
-
-              // Check if a playlist with these items already exists
-              let existingPl = (targetChannel.audioPlaylists || []).find(pl => {
-                if (!Array.isArray(pl.items) || pl.items.length !== audioIds.length) return false;
-                return pl.items.every((id, idx) => id === audioIds[idx]);
-              });
-
-              if (existingPl && existingPl.mergedFilePath) {
-                const fullP = normalizeFilePath(existingPl.mergedFilePath);
-                if (fullP && fs.existsSync(fullP)) {
-                  singleAudioFile = fullP;
-                  s.audioPath = existingPl.id;
-                  this._save();
-                  this._log(s, `Reusing existing channel playlist "${existingPl.name}": ${path.basename(singleAudioFile)}`, 'info');
-                }
-              }
-
-              if (!singleAudioFile) {
-                this._log(s, `Creating and auto-merging new channel playlist for "${s.name}"...`, 'info');
-                const newPl = await channelStore.addPlaylist(targetChannel.id, {
-                  name: `Playlist - ${s.name}`,
-                  description: `Auto-generated from stream "${s.name}" (${audios.length} audios)`,
-                  type: 'audio',
-                  items: audioIds.length > 0 ? audioIds : (targetChannel.audios || []).map(a => a.id)
-                });
-                if (newPl && newPl.mergedFilePath) {
-                  const fullP = normalizeFilePath(newPl.mergedFilePath);
-                  if (fullP && fs.existsSync(fullP)) {
-                    singleAudioFile = fullP;
-                    s.audioPath = newPl.id;
-                    this._save();
-                    this._log(s, `Created channel playlist "${newPl.name}": ${path.basename(singleAudioFile)}`, 'success');
-                  }
-                }
-              }
-            }
-
-            if (!singleAudioFile) {
-              // Fallback / shuffle mode: generate stream audio cache
-              const streamMergedPath = path.join(UPLOADS_CACHE_DIR, `stream_${s.id}_audio.m4a`);
-              this._log(s, `Auto-merging ${audios.length} audio file(s) into stream track (${s.audioMode || 'sequential'})...`, 'info');
-              const mergedRes = await mergeAudioFiles(audios, streamMergedPath, s.audioMode);
-              if (mergedRes && fs.existsSync(mergedRes)) {
-                singleAudioFile = mergedRes;
-              } else {
-                singleAudioFile = audios[0];
-              }
+            // Fallback: merge on-the-fly into stream cache
+            const streamMergedPath = path.join(UPLOADS_CACHE_DIR, `stream_${s.id}_audio.m4a`);
+            this._log(s, `Auto-merging ${audios.length} audio file(s) into stream track (${s.audioMode || 'sequential'})...`, 'info');
+            const mergedRes = await mergeAudioFiles(audios, streamMergedPath, s.audioMode);
+            if (mergedRes && fs.existsSync(mergedRes)) {
+              singleAudioFile = mergedRes;
+            } else {
+              singleAudioFile = audios[0];
             }
           }
           totalAudioDuration = await getMediaDurationInSeconds(singleAudioFile);
@@ -1798,6 +1746,76 @@ app.use('/api', (req, res, next) => {
   authenticateToken(req, res, next);
 });
 
+// Helper: Ensure any stream with audio files gets an auto-registered channel playlist
+async function ensureStreamAudioPlaylist(s) {
+  if (!s || !s.audioPath) return null;
+  if (s.audioPath.startsWith('pl_')) {
+    return s.audioPath;
+  }
+
+  // Find target channel
+  let targetChannel = null;
+  for (const [, ch] of channelStore.channels) {
+    if (ch.name === s.channelName || ch.id === s.channelName) {
+      targetChannel = ch;
+      break;
+    }
+  }
+  if (!targetChannel) return null;
+
+  const rawAudios = s.audioPath.includes(',')
+    ? s.audioPath.split(',').map(f => f.trim()).filter(Boolean)
+    : [s.audioPath.trim()];
+
+  if (rawAudios.length === 0) return null;
+
+  // Resolve audio IDs in channel
+  const audioIds = [];
+  for (const aPath of rawAudios) {
+    const found = (targetChannel.audios || []).find(a => {
+      return a.id === aPath || 
+             normalizeFilePath(a.filePath) === normalizeFilePath(aPath) || 
+             (a.url && a.url.toLowerCase() === aPath.toLowerCase()) ||
+             (a.title && a.title.toLowerCase() === path.basename(aPath).toLowerCase());
+    });
+    if (found) audioIds.push(found.id);
+  }
+
+  if (audioIds.length === 0) {
+    for (const a of (targetChannel.audios || [])) {
+      audioIds.push(a.id);
+    }
+  }
+
+  if (audioIds.length === 0) return null;
+
+  // Check if a playlist with these exact items already exists in channel
+  let existingPl = (targetChannel.audioPlaylists || []).find(pl => {
+    if (!Array.isArray(pl.items) || pl.items.length !== audioIds.length) return false;
+    return pl.items.every((id, idx) => id === audioIds[idx]);
+  });
+
+  if (existingPl) {
+    s.audioPath = existingPl.id;
+    return existingPl.id;
+  }
+
+  // Create new channel playlist
+  const plName = `Playlist - ${s.name || 'Stream'}`;
+  const newPl = await channelStore.addPlaylist(targetChannel.id, {
+    name: plName,
+    description: `Auto-generated from stream "${s.name || 'Stream'}" (${audioIds.length} tracks)`,
+    type: 'audio',
+    items: audioIds
+  });
+
+  if (newPl && newPl.id) {
+    s.audioPath = newPl.id;
+    return newPl.id;
+  }
+  return null;
+}
+
 // ============================================================
 // API Routes: STREAMS
 // ============================================================
@@ -1812,7 +1830,10 @@ app.get('/api/streams/:id', (req, res) => {
   res.json(s);
 });
 
-app.post('/api/streams', (req, res) => {
+app.post('/api/streams', async (req, res) => {
+  try {
+    await ensureStreamAudioPlaylist(req.body);
+  } catch (_) { }
   const s = manager.add(req.body);
   res.status(201).json(s);
 });
@@ -1823,7 +1844,10 @@ app.post('/api/streams/:id/duplicate', (req, res) => {
   res.status(201).json(s);
 });
 
-app.put('/api/streams/:id', (req, res) => {
+app.put('/api/streams/:id', async (req, res) => {
+  try {
+    await ensureStreamAudioPlaylist(req.body);
+  } catch (_) { }
   const result = manager.update(req.params.id, req.body);
   if (!result) return res.status(404).json({ error: 'Not found' });
   if (result.error) return res.status(400).json(result);
@@ -2588,6 +2612,16 @@ app.listen(PORT, async () => {
   console.log(`  ║   http://localhost:${PORT}                  ║`);
   console.log(`  ╚══════════════════════════════════════════╝\n`);
   await channelStore.fixDurations();
+
+  // Auto-generate playlists for existing multi-audio streams
+  for (const [, s] of manager.streams) {
+    if (s.audioPath && !s.audioPath.startsWith('pl_')) {
+      try {
+        await ensureStreamAudioPlaylist(s);
+      } catch (_) { }
+    }
+  }
+  manager._save();
 
   // Periodic System Stats Broadcast every 10 seconds
   setInterval(async () => {

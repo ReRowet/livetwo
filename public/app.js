@@ -2431,6 +2431,11 @@ const App = {
     if (result) {
       this.toast('Stream started', 'success');
       this.fetchStreams();
+      await this.fetchChannels();
+      if (this.currentChannel) {
+        this.currentChannel = this.channels.find(c => c.id === this.currentChannel.id) || this.currentChannel;
+        this.renderPlaylistsColumn();
+      }
     }
   },
 
@@ -3062,6 +3067,11 @@ const App = {
       this.toast(id ? 'Stream updated' : 'Stream created successfully', 'success');
       this.closeModal();
       this.fetchStreams();
+      await this.fetchChannels();
+      if (this.currentChannel) {
+        this.currentChannel = this.channels.find(c => c.id === this.currentChannel.id) || this.currentChannel;
+        this.renderPlaylistsColumn();
+      }
     }
   },
 
