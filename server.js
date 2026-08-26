@@ -1166,14 +1166,69 @@ class StreamManager {
             singleAudioFile = preMerged;
             this._log(s, `Using pre-merged playlist audio track: ${path.basename(singleAudioFile)}`, 'info');
           } else {
-            // 2. Auto-merge multiple audio files on-the-fly into a clean single audio track
-            const streamMergedPath = path.join(UPLOADS_CACHE_DIR, `stream_${s.id}_audio.m4a`);
-            this._log(s, `Auto-merging ${audios.length} audio file(s) into single stream track (${s.audioMode || 'sequential'})...`, 'info');
-            const mergedRes = await mergeAudioFiles(audios, streamMergedPath, s.audioMode);
-            if (mergedRes && fs.existsSync(mergedRes)) {
-              singleAudioFile = mergedRes;
-            } else {
-              singleAudioFile = audios[0];
+            // Find target channel
+            let targetChannel = null;
+            for (const [, ch] of channelStore.channels) {
+              if (ch.name === s.channelName || ch.id === s.channelName) {
+                targetChannel = ch;
+                break;
+              }
+            }
+
+            if (targetChannel && s.audioMode !== 'shuffle') {
+              // Extract audio IDs from channel audios matching paths
+              const audioIds = [];
+              for (const aPath of audios) {
+                const found = (targetChannel.audios || []).find(a => normalizeFilePath(a.filePath || a.url) === aPath);
+                if (found) audioIds.push(found.id);
+              }
+
+              // Check if a playlist with these items already exists
+              let existingPl = (targetChannel.audioPlaylists || []).find(pl => {
+                if (!Array.isArray(pl.items) || pl.items.length !== audioIds.length) return false;
+                return pl.items.every((id, idx) => id === audioIds[idx]);
+              });
+
+              if (existingPl && existingPl.mergedFilePath) {
+                const fullP = normalizeFilePath(existingPl.mergedFilePath);
+                if (fullP && fs.existsSync(fullP)) {
+                  singleAudioFile = fullP;
+                  s.audioPath = existingPl.id;
+                  this._save();
+                  this._log(s, `Reusing existing channel playlist "${existingPl.name}": ${path.basename(singleAudioFile)}`, 'info');
+                }
+              }
+
+              if (!singleAudioFile) {
+                this._log(s, `Creating and auto-merging new channel playlist for "${s.name}"...`, 'info');
+                const newPl = await channelStore.addPlaylist(targetChannel.id, {
+                  name: `Playlist - ${s.name}`,
+                  description: `Auto-generated from stream "${s.name}" (${audios.length} audios)`,
+                  type: 'audio',
+                  items: audioIds.length > 0 ? audioIds : (targetChannel.audios || []).map(a => a.id)
+                });
+                if (newPl && newPl.mergedFilePath) {
+                  const fullP = normalizeFilePath(newPl.mergedFilePath);
+                  if (fullP && fs.existsSync(fullP)) {
+                    singleAudioFile = fullP;
+                    s.audioPath = newPl.id;
+                    this._save();
+                    this._log(s, `Created channel playlist "${newPl.name}": ${path.basename(singleAudioFile)}`, 'success');
+                  }
+                }
+              }
+            }
+
+            if (!singleAudioFile) {
+              // Fallback / shuffle mode: generate stream audio cache
+              const streamMergedPath = path.join(UPLOADS_CACHE_DIR, `stream_${s.id}_audio.m4a`);
+              this._log(s, `Auto-merging ${audios.length} audio file(s) into stream track (${s.audioMode || 'sequential'})...`, 'info');
+              const mergedRes = await mergeAudioFiles(audios, streamMergedPath, s.audioMode);
+              if (mergedRes && fs.existsSync(mergedRes)) {
+                singleAudioFile = mergedRes;
+              } else {
+                singleAudioFile = audios[0];
+              }
             }
           }
           totalAudioDuration = await getMediaDurationInSeconds(singleAudioFile);
