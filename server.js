@@ -237,7 +237,7 @@ const audioStorage = multer.diskStorage({
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
     const basename = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, '_');
-    cb(null, `${basename}_raw_${Date.now()}${ext}`);
+    cb(null, `${basename}_${Date.now()}${ext}`);
   }
 });
 
@@ -267,7 +267,7 @@ function convertAudioToAAC(inputPath, outputPath) {
   });
 }
 
-// Helper: Fast Merge Multiple Audio Files into a Single Track (for Playlists & Live Stream)
+// Helper: Seamless Gapless Merge of Multiple Audio Files into a Single Track (for Playlists & Live Stream)
 function mergeAudioFiles(audioFilePaths, outputPath, mode = 'sequential') {
   return new Promise((resolve, reject) => {
     if (!audioFilePaths || audioFilePaths.length === 0) return resolve(null);
@@ -278,7 +278,28 @@ function mergeAudioFiles(audioFilePaths, outputPath, mode = 'sequential') {
       if (p && fs.existsSync(p)) validFiles.push(p);
     }
     if (validFiles.length === 0) return resolve(null);
-    if (validFiles.length === 1) return resolve(validFiles[0]);
+    if (validFiles.length === 1) {
+      const single = validFiles[0];
+      if (single.toLowerCase().endsWith('.m4a') && single === outputPath) return resolve(single);
+      ffmpeg(single)
+        .outputOptions([
+          '-y',
+          '-map', '0:a:0',
+          '-vn', '-sn', '-dn',
+          '-map_metadata', '-1',
+          '-c:a', 'aac',
+          '-b:a', '192k',
+          '-ar', '44100',
+          '-ac', '2',
+          '-af', 'aresample=44100:async=1:first_pts=0,asetpts=PTS-STARTPTS',
+          '-movflags', '+faststart'
+        ])
+        .output(outputPath)
+        .on('end', () => resolve(outputPath))
+        .on('error', () => resolve(single))
+        .run();
+      return;
+    }
 
     let ordered = [...validFiles];
     if (mode === 'shuffle') {
@@ -288,29 +309,44 @@ function mergeAudioFiles(audioFilePaths, outputPath, mode = 'sequential') {
       }
     }
 
-    const tempTxt = outputPath + '.txt';
-    const lines = ordered.map(f => `file '${f.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`);
-    fs.writeFileSync(tempTxt, lines.join('\n'), 'utf-8');
-
     if (fs.existsSync(outputPath)) {
       try { fs.unlinkSync(outputPath); } catch (_) { }
     }
 
-    ffmpeg(tempTxt)
-      .inputOptions(['-f', 'concat', '-safe', '0'])
+    // 1. Primary Engine: Seamless Multi-Input Filtergraph Concat (Zero Gap, Continuous Clock)
+    const cmd = ffmpeg();
+    ordered.forEach(f => cmd.input(f));
+
+    const filterInputs = [];
+    const filterResamples = [];
+    ordered.forEach((_, idx) => {
+      filterResamples.push(`[${idx}:a]aresample=44100:async=1:first_pts=0[a${idx}]`);
+      filterInputs.push(`[a${idx}]`);
+    });
+    const complexFilter = `${filterResamples.join(';')};${filterInputs.join('')}concat=n=${ordered.length}:v=0:a=1,asetpts=PTS-STARTPTS[out]`;
+
+    cmd
+      .complexFilter(complexFilter)
       .outputOptions([
         '-y',
-        '-c', 'copy',
+        '-map', '[out]',
+        '-vn', '-sn', '-dn',
+        '-map_metadata', '-1',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-ar', '44100',
+        '-ac', '2',
         '-movflags', '+faststart'
       ])
       .output(outputPath)
-      .on('end', () => {
-        try { if (fs.existsSync(tempTxt)) fs.unlinkSync(tempTxt); } catch (_) { }
-        resolve(outputPath);
-      })
+      .on('end', () => resolve(outputPath))
       .on('error', (err) => {
-        console.warn('[mergeAudioFiles Copy Fallback to Re-encode]:', err.message);
-        // Fallback with clean AAC filter if stream copy encounters format disparity
+        console.warn('[mergeAudioFiles Filtergraph Fallback to Concat Demuxer]:', err.message);
+        // 2. Fallback Engine: Concat Demuxer with Transcode
+        const tempTxt = outputPath + '.txt';
+        const lines = ordered.map(f => `file '${f.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`);
+        fs.writeFileSync(tempTxt, lines.join('\n'), 'utf-8');
+
         ffmpeg(tempTxt)
           .inputOptions(['-f', 'concat', '-safe', '0'])
           .outputOptions([
@@ -1978,69 +2014,22 @@ app.post('/api/channels/:id/upload-audios', uploadAudiosMulter.array('audios'), 
 
   const added = [];
   for (const file of req.files) {
-    const rawPath = file.path;
-    // Fix filename collision by removing '_raw_' from target file path
-    const aacFilename = path.basename(file.filename, path.extname(file.filename)).replace('_raw_', '_') + '.aac';
-    const aacPath = path.join(UPLOADS_AUDIOS_DIR, aacFilename);
-
-    let success = false;
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+    const webUrl = `/uploads/audios/${file.filename}`;
+    const fullPath = file.path.replace(/\\/g, '/');
     let duration = '0:00';
-    let sizeMb = '0.00 MB';
-    let errorMessage = '';
+    try {
+      duration = await getMediaDuration(file.path);
+    } catch (_) { }
 
-    // Convert with retry loop (up to 2 retries) and check for corruption
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        if (fs.existsSync(aacPath)) {
-          try { fs.unlinkSync(aacPath); } catch (_) { }
-        }
-
-        await convertAudioToAAC(rawPath, aacPath);
-
-        if (!fs.existsSync(aacPath) || fs.statSync(aacPath).size === 0) {
-          throw new Error('Hasil konversi kosong atau file tidak terbentuk.');
-        }
-
-        duration = await getMediaDuration(aacPath);
-        if (duration === '0:00') {
-          throw new Error('File hasil konversi terdeteksi korup (durasi 0:00).');
-        }
-
-        const stat = fs.statSync(aacPath);
-        sizeMb = (stat.size / (1024 * 1024)).toFixed(2) + ' MB';
-        success = true;
-        break;
-      } catch (err) {
-        errorMessage = err.message;
-        console.warn(`[Audio Convert Attempt ${attempt}] Failed for ${file.originalname}: ${err.message}`);
-        if (fs.existsSync(aacPath)) {
-          try { fs.unlinkSync(aacPath); } catch (_) { }
-        }
-      }
-    }
-
-    if (success) {
-      // Remove raw file after successful conversion
-      try { if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath); } catch (_) { }
-
-      const webUrl = `/uploads/audios/${aacFilename}`;
-      const fullPath = aacPath.replace(/\\/g, '/');
-
-      const audioItem = channelStore.addAudio(channelId, {
-        title: file.originalname.replace(/\.[^/.]+$/, "") + '.aac',
-        size: sizeMb,
-        duration: duration,
-        url: webUrl,
-        filePath: fullPath
-      });
-      added.push(audioItem);
-    } else {
-      // Clean up all uploaded raw files in this request if any fails
-      for (const f of req.files) {
-        try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) { }
-      }
-      return res.status(400).json({ error: `Gagal mengonversi audio "${file.originalname}": ${errorMessage}` });
-    }
+    const audioItem = channelStore.addAudio(channelId, {
+      title: file.originalname,
+      size: sizeMb,
+      duration: duration,
+      url: webUrl,
+      filePath: fullPath
+    });
+    added.push(audioItem);
   }
 
   res.status(201).json({ success: true, count: added.length, audios: added });
