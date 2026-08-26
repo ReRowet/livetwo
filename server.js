@@ -66,7 +66,7 @@ class SessionManager {
   _save() {
     try {
       fs.writeFileSync(SESSIONS_FILE, JSON.stringify(Array.from(this.refreshTokens), null, 2), 'utf-8');
-    } catch (_) {}
+    } catch (_) { }
   }
 
   addRefreshToken(token) {
@@ -188,7 +188,7 @@ function safelyDeleteFile(rawPath) {
             console.log(`[File Delete] Deleted candidate in ${dir}: ${cand}`);
             deleted = true;
           }
-        } catch (_) {}
+        } catch (_) { }
       }
     }
   }
@@ -888,7 +888,7 @@ class StreamManager {
       if (fs.existsSync(vp)) fs.unlinkSync(vp);
       if (fs.existsSync(ap)) fs.unlinkSync(ap);
       if (fs.existsSync(lp)) fs.unlinkSync(lp);
-    } catch (_) {}
+    } catch (_) { }
     this._broadcastStatus();
     return true;
   }
@@ -1057,7 +1057,7 @@ class StreamManager {
     s._stopRequested = true;
     s.activeInstanceId = null;
     if (s.commandInstance) {
-      try { s.commandInstance.kill('SIGKILL'); } catch (_) {}
+      try { s.commandInstance.kill('SIGKILL'); } catch (_) { }
       s.commandInstance = null;
     }
     if (s.proc) {
@@ -1067,7 +1067,7 @@ class StreamManager {
         } else {
           s.proc.kill('SIGKILL');
         }
-      } catch (_) {}
+      } catch (_) { }
       s.proc = null;
     }
     s.status = 'idle';
@@ -1104,7 +1104,7 @@ class StreamManager {
               '-loglevel', 'info',
               '-fflags', '+genpts+igndts',
               '-avoid_negative_ts', 'make_zero',
-              '-re',
+              // '-re',
               '-stream_loop', '-1'
             ]);
         }
@@ -1112,7 +1112,15 @@ class StreamManager {
         if (audios.length > 0) {
           if (isAudioPlaylistMode) {
             command.input(audioPlaylist)
-              .inputOptions(['-re', '-f', 'concat', '-safe', '0', '-stream_loop', '-1']);
+              .inputOptions([
+                '-re',
+                '-f',
+                'concat',
+                '-safe',
+                '0',
+                '-stream_loop',
+                '-1'
+              ]);
           } else {
             command.input(audios[0])
               .inputOptions(['-re', '-stream_loop', '-1']);
@@ -1261,7 +1269,7 @@ class StreamManager {
             resolved.push(...dirFiles);
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     return resolved;
   }
@@ -1306,12 +1314,12 @@ class StreamManager {
     try {
       const logFile = path.join(LOGS_DIR, `${s.id}.log`);
       fs.appendFileSync(logFile, `${timestamp}|${level}|${message}\n`, 'utf-8');
-    } catch (_) {}
+    } catch (_) { }
 
     const clients = this.sseClients.get(s.id) || [];
     const data = JSON.stringify(logEntry);
     for (const client of clients) {
-      try { client.write(`data: ${data}\n\n`); } catch (_) {}
+      try { client.write(`data: ${data}\n\n`); } catch (_) { }
     }
 
     console.log(`[${s.name || s.id.slice(0, 8)}] ${message}`);
@@ -1320,7 +1328,7 @@ class StreamManager {
   _broadcastStatus() {
     const data = JSON.stringify({ type: 'status', streams: this.list() });
     for (const client of this.globalSSEClients) {
-      try { client.write(`data: ${data}\n\n`); } catch (_) {}
+      try { client.write(`data: ${data}\n\n`); } catch (_) { }
     }
   }
 
@@ -1328,7 +1336,7 @@ class StreamManager {
     if (!stats || this.globalSSEClients.size === 0) return;
     const data = JSON.stringify({ type: 'system_stats', stats });
     for (const client of this.globalSSEClients) {
-      try { client.write(`data: ${data}\n\n`); } catch (_) {}
+      try { client.write(`data: ${data}\n\n`); } catch (_) { }
     }
   }
 
@@ -1758,7 +1766,7 @@ app.post('/api/channels/:id/upload-videos', uploadVideosMulter.array('videos'), 
     if (!comp.compatible) {
       // Clean up all uploaded files in this batch to keep disk clean
       for (const f of req.files) {
-        try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) {}
+        try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) { }
       }
       return res.status(400).json({ error: `File "${file.originalname}" tidak kompatibel: ${comp.reason}` });
     }
@@ -1815,7 +1823,7 @@ app.post('/api/channels/:id/upload-audios', uploadAudiosMulter.array('audios'), 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         if (fs.existsSync(aacPath)) {
-          try { fs.unlinkSync(aacPath); } catch (_) {}
+          try { fs.unlinkSync(aacPath); } catch (_) { }
         }
 
         await convertAudioToAAC(rawPath, aacPath);
@@ -1837,14 +1845,14 @@ app.post('/api/channels/:id/upload-audios', uploadAudiosMulter.array('audios'), 
         errorMessage = err.message;
         console.warn(`[Audio Convert Attempt ${attempt}] Failed for ${file.originalname}: ${err.message}`);
         if (fs.existsSync(aacPath)) {
-          try { fs.unlinkSync(aacPath); } catch (_) {}
+          try { fs.unlinkSync(aacPath); } catch (_) { }
         }
       }
     }
 
     if (success) {
       // Remove raw file after successful conversion
-      try { if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath); } catch (_) {}
+      try { if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath); } catch (_) { }
 
       const webUrl = `/uploads/audios/${aacFilename}`;
       const fullPath = aacPath.replace(/\\/g, '/');
@@ -1860,7 +1868,7 @@ app.post('/api/channels/:id/upload-audios', uploadAudiosMulter.array('audios'), 
     } else {
       // Clean up all uploaded raw files in this request if any fails
       for (const f of req.files) {
-        try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) {}
+        try { if (fs.existsSync(f.path)) fs.unlinkSync(f.path); } catch (_) { }
       }
       return res.status(400).json({ error: `Gagal mengonversi audio "${file.originalname}": ${errorMessage}` });
     }
@@ -1930,9 +1938,9 @@ function getOrphanUploads() {
               totalOrphanBytes += stat.size;
             }
           }
-        } catch (_) {}
+        } catch (_) { }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return { orphanFiles, totalOrphanBytes };
@@ -1966,11 +1974,11 @@ function getTempCacheInfo() {
                 tempFiles.push({ path: fullPath, name: file, type: 'playlist_concat', size: stat.size });
                 totalTempBytes += stat.size;
               }
-            } catch (_) {}
+            } catch (_) { }
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   // 2. Logs directory (.log files of stopped/idle streams)
@@ -1990,11 +1998,11 @@ function getTempCacheInfo() {
                 tempFiles.push({ path: fullPath, name: file, type: 'log', size: stat.size });
                 totalTempBytes += stat.size;
               }
-            } catch (_) {}
+            } catch (_) { }
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return { tempFiles, totalTempBytes };
@@ -2082,7 +2090,7 @@ app.post('/api/system/maintenance/clean-cache', authenticateToken, (req, res) =>
           deletedCount++;
           freedBytes += f.size;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     res.json({
@@ -2111,7 +2119,7 @@ app.post('/api/system/maintenance/clean-zombies', authenticateToken, async (req,
           process.kill(zp.pid, 'SIGKILL');
         }
         killedCount++;
-      } catch (_) {}
+      } catch (_) { }
     }
 
     let syncedStreams = 0;
@@ -2152,7 +2160,7 @@ app.post('/api/system/maintenance/clean-uploads', authenticateToken, (req, res) 
           deletedCount++;
           freedBytes += ofile.size;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     res.json({
@@ -2181,7 +2189,7 @@ app.post('/api/system/maintenance/clean-all', authenticateToken, async (req, res
           cacheDeleted++;
           cacheFreedBytes += f.size;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 2. Clean Zombies
@@ -2195,7 +2203,7 @@ app.post('/api/system/maintenance/clean-all', authenticateToken, async (req, res
           process.kill(zp.pid, 'SIGKILL');
         }
         killedZombies++;
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // Sync stream status
@@ -2221,7 +2229,7 @@ app.post('/api/system/maintenance/clean-all', authenticateToken, async (req, res
           uploadsDeleted++;
           uploadsFreedBytes += ofile.size;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     const totalFreedBytes = cacheFreedBytes + uploadsFreedBytes;
@@ -2344,6 +2352,6 @@ app.listen(PORT, async () => {
     try {
       const stats = await getSystemMetrics();
       manager._broadcastSystemStats(stats);
-    } catch (_) {}
+    } catch (_) { }
   }, 10000);
 });
