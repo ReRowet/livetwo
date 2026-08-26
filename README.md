@@ -75,3 +75,9 @@ PORT=3002
 JWT_SECRET=re_stream_jwt_secret_token_2026_super_secure
 JWT_REFRESH_SECRET=re_stream_jwt_refresh_secret_2026_super_secure
 ```
+
+
+  ▶ Cek Status:     pm2 status           (atau npm run pm2:status)
+  ▶ Realtime Log:   pm2 logs re-stream-web (atau npm run pm2:logs)
+  ▶ Restart Server: pm2 restart re-stream-web
+  ▶ Stop Server:    pm2 stop re-stream-web
