@@ -243,7 +243,7 @@ const audioStorage = multer.diskStorage({
 const uploadVideosMulter = multer({ storage: videoStorage });
 const uploadAudiosMulter = multer({ storage: audioStorage });
 
-// Helper: FFmpeg Audio Conversion to AAC
+// Helper: FFmpeg Audio Conversion to AAC (with Sample Clock Sync & Timestamp Normalization)
 function convertAudioToAAC(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     const safeInput = normalizeFilePath(inputPath);
@@ -252,10 +252,12 @@ function convertAudioToAAC(inputPath, outputPath) {
         '-y',
         '-map', '0:a:0',
         '-vn', '-sn', '-dn',
+        '-map_metadata', '-1',
         '-c:a', 'aac',
         '-b:a', '192k',
         '-ar', '44100',
-        '-ac', '2'
+        '-ac', '2',
+        '-af', 'aresample=44100:async=1:first_pts=0,asetpts=PTS-STARTPTS'
       ])
       .output(outputPath)
       .on('end', () => resolve(outputPath))
