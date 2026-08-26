@@ -34,12 +34,13 @@ const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const UPLOADS_VIDEOS_DIR = path.join(UPLOADS_DIR, 'videos');
 const UPLOADS_AUDIOS_DIR = path.join(UPLOADS_DIR, 'audios');
 const UPLOADS_THUMBS_DIR = path.join(UPLOADS_DIR, 'thumbnails');
+const UPLOADS_CACHE_DIR = path.join(UPLOADS_DIR, 'playlist_cache');
 const STREAMS_FILE = path.join(DATA_DIR, 'streams.json');
 const CHANNELS_FILE = path.join(DATA_DIR, 'channels.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 
 // Ensure directories exist
-[DATA_DIR, PLAYLISTS_DIR, LOGS_DIR, UPLOADS_DIR, UPLOADS_VIDEOS_DIR, UPLOADS_AUDIOS_DIR, UPLOADS_THUMBS_DIR].forEach(dir => {
+[DATA_DIR, PLAYLISTS_DIR, LOGS_DIR, UPLOADS_DIR, UPLOADS_VIDEOS_DIR, UPLOADS_AUDIOS_DIR, UPLOADS_THUMBS_DIR, UPLOADS_CACHE_DIR].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -262,6 +263,74 @@ function convertAudioToAAC(inputPath, outputPath) {
       .output(outputPath)
       .on('end', () => resolve(outputPath))
       .on('error', (err) => reject(err))
+      .run();
+// Helper: Fast Merge Multiple Audio Files into a Single Track (for Playlists & Live Stream)
+function mergeAudioFiles(audioFilePaths, outputPath, mode = 'sequential') {
+  return new Promise((resolve, reject) => {
+    if (!audioFilePaths || audioFilePaths.length === 0) return resolve(null);
+
+    const validFiles = [];
+    for (const raw of audioFilePaths) {
+      const p = normalizeFilePath(raw);
+      if (p && fs.existsSync(p)) validFiles.push(p);
+    }
+    if (validFiles.length === 0) return resolve(null);
+    if (validFiles.length === 1) return resolve(validFiles[0]);
+
+    let ordered = [...validFiles];
+    if (mode === 'shuffle') {
+      for (let i = ordered.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [ordered[i], ordered[j]] = [ordered[j], ordered[i]];
+      }
+    }
+
+    const tempTxt = outputPath + '.txt';
+    const lines = ordered.map(f => `file '${f.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`);
+    fs.writeFileSync(tempTxt, lines.join('\n'), 'utf-8');
+
+    if (fs.existsSync(outputPath)) {
+      try { fs.unlinkSync(outputPath); } catch (_) { }
+    }
+
+    ffmpeg(tempTxt)
+      .inputOptions(['-f', 'concat', '-safe', '0'])
+      .outputOptions([
+        '-y',
+        '-c', 'copy',
+        '-movflags', '+faststart'
+      ])
+      .output(outputPath)
+      .on('end', () => {
+        try { if (fs.existsSync(tempTxt)) fs.unlinkSync(tempTxt); } catch (_) { }
+        resolve(outputPath);
+      })
+      .on('error', (err) => {
+        console.warn('[mergeAudioFiles Copy Fallback to Re-encode]:', err.message);
+        // Fallback with clean AAC filter if stream copy encounters format disparity
+        ffmpeg(tempTxt)
+          .inputOptions(['-f', 'concat', '-safe', '0'])
+          .outputOptions([
+            '-y',
+            '-map_metadata', '-1',
+            '-c:a', 'aac',
+            '-b:a', '192k',
+            '-ar', '44100',
+            '-ac', '2',
+            '-af', 'aresample=44100:async=1:first_pts=0,asetpts=PTS-STARTPTS',
+            '-movflags', '+faststart'
+          ])
+          .output(outputPath)
+          .on('end', () => {
+            try { if (fs.existsSync(tempTxt)) fs.unlinkSync(tempTxt); } catch (_) { }
+            resolve(outputPath);
+          })
+          .on('error', (err2) => {
+            try { if (fs.existsSync(tempTxt)) fs.unlinkSync(tempTxt); } catch (_) { }
+            reject(err2);
+          })
+          .run();
+      })
       .run();
   });
 }
@@ -531,7 +600,7 @@ class ChannelStore {
     return newAudio;
   }
 
-  addPlaylist(channelId, { name, description, type, items }) {
+  async addPlaylist(channelId, { name, description, type, items }) {
     const c = this.channels.get(channelId);
     if (!c) return null;
     const isVideo = type === 'video';
@@ -540,14 +609,49 @@ class ChannelStore {
 
     // Start with 0 items unless user selected items
     const validItems = Array.isArray(items) ? items : [];
+    const id = 'pl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
+    let mergedFilePath = '';
+    let totalDuration = '0:00';
+    let totalDurationSec = 0;
+
+    // If audio playlist and has items, auto-merge into a single track
+    if (!isVideo && validItems.length > 0) {
+      try {
+        const audioPaths = [];
+        const allAudios = c.audios || [];
+        for (const itemId of validItems) {
+          const a = allAudios.find(m => m.id === itemId);
+          if (a) {
+            const p = normalizeFilePath(a.filePath || a.url || '');
+            if (p && fs.existsSync(p)) audioPaths.push(p);
+          }
+        }
+        if (audioPaths.length > 0) {
+          const mergedName = `playlist_${id}.m4a`;
+          const targetPath = path.join(UPLOADS_CACHE_DIR, mergedName);
+          await mergeAudioFiles(audioPaths, targetPath, 'sequential');
+          if (fs.existsSync(targetPath)) {
+            mergedFilePath = `/uploads/playlist_cache/${mergedName}`;
+            totalDurationSec = await getMediaDurationInSeconds(targetPath);
+            totalDuration = formatSecondsToTimemark(totalDurationSec);
+          }
+        }
+      } catch (err) {
+        console.warn(`[Auto-Merge Audio Playlist] Failed for ${id}:`, err.message);
+      }
+    }
 
     const newPlaylist = {
-      id: 'pl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      id,
       name: name || (isVideo ? 'Video Playlist' : 'Audio Playlist'),
       description: description || '',
       type: isVideo ? 'video' : 'audio',
       items: validItems,
       count: validItems.length,
+      mergedFilePath,
+      duration: totalDuration,
+      durationSec: totalDurationSec,
       createdAt: Date.now()
     };
     c[field].push(newPlaylist);
@@ -555,15 +659,17 @@ class ChannelStore {
     return newPlaylist;
   }
 
-  updatePlaylist(channelId, playlistId, { name, description, items }) {
+  async updatePlaylist(channelId, playlistId, { name, description, items }) {
     const c = this.channels.get(channelId);
     if (!c) return null;
     let playlist = null;
+    let isVideo = false;
     if (Array.isArray(c.audioPlaylists)) {
       playlist = c.audioPlaylists.find(p => p.id === playlistId);
     }
     if (!playlist && Array.isArray(c.videoPlaylists)) {
       playlist = c.videoPlaylists.find(p => p.id === playlistId);
+      isVideo = true;
     }
     if (!playlist) return null;
 
@@ -572,6 +678,40 @@ class ChannelStore {
     if (Array.isArray(items)) {
       playlist.items = items;
       playlist.count = items.length;
+
+      // Re-merge audio playlist if items changed
+      if (!isVideo) {
+        try {
+          const audioPaths = [];
+          const allAudios = c.audios || [];
+          for (const itemId of items) {
+            const a = allAudios.find(m => m.id === itemId);
+            if (a) {
+              const p = normalizeFilePath(a.filePath || a.url || '');
+              if (p && fs.existsSync(p)) audioPaths.push(p);
+            }
+          }
+          const mergedName = `playlist_${playlist.id}.m4a`;
+          const targetPath = path.join(UPLOADS_CACHE_DIR, mergedName);
+          if (audioPaths.length > 0) {
+            await mergeAudioFiles(audioPaths, targetPath, 'sequential');
+            if (fs.existsSync(targetPath)) {
+              playlist.mergedFilePath = `/uploads/playlist_cache/${mergedName}`;
+              playlist.durationSec = await getMediaDurationInSeconds(targetPath);
+              playlist.duration = formatSecondsToTimemark(playlist.durationSec);
+            }
+          } else {
+            if (fs.existsSync(targetPath)) {
+              try { fs.unlinkSync(targetPath); } catch (_) { }
+            }
+            playlist.mergedFilePath = '';
+            playlist.duration = '0:00';
+            playlist.durationSec = 0;
+          }
+        } catch (err) {
+          console.warn(`[Auto-Merge Audio Playlist Update] Failed for ${playlist.id}:`, err.message);
+        }
+      }
     }
     this._save();
     return playlist;
@@ -584,7 +724,14 @@ class ChannelStore {
     if (Array.isArray(c.audioPlaylists)) {
       const idx = c.audioPlaylists.findIndex(p => p.id === playlistId);
       if (idx !== -1) {
-        c.audioPlaylists.splice(idx, 1);
+        const [pl] = c.audioPlaylists.splice(idx, 1);
+        if (pl && pl.mergedFilePath) {
+          safelyDeleteFile(pl.mergedFilePath);
+        }
+        const cacheFile = path.join(UPLOADS_CACHE_DIR, `playlist_${playlistId}.m4a`);
+        if (fs.existsSync(cacheFile)) {
+          try { fs.unlinkSync(cacheFile); } catch (_) { }
+        }
         ok = true;
       }
     }
@@ -884,9 +1031,11 @@ class StreamManager {
     try {
       const vp = path.join(PLAYLISTS_DIR, `video_${id}.txt`);
       const ap = path.join(PLAYLISTS_DIR, `audio_${id}.txt`);
+      const sa = path.join(UPLOADS_CACHE_DIR, `stream_${id}_audio.m4a`);
       const lp = path.join(LOGS_DIR, `${id}.log`);
       if (fs.existsSync(vp)) fs.unlinkSync(vp);
       if (fs.existsSync(ap)) fs.unlinkSync(ap);
+      if (fs.existsSync(sa)) fs.unlinkSync(sa);
       if (fs.existsSync(lp)) fs.unlinkSync(lp);
     } catch (_) { }
     this._broadcastStatus();
@@ -952,20 +1101,43 @@ class StreamManager {
         totalVideoDuration = await getMediaDurationInSeconds(videos[0]);
       }
 
-      let audioPlaylistPath = null;
+      let singleAudioFile = null;
       let totalAudioDuration = 0;
       if (audios.length > 0) {
-        if (isAudioPlaylistMode) {
-          const apRes = await this._buildPlaylist(
-            audios,
-            s.audioMode,
-            path.join(PLAYLISTS_DIR, `audio_${s.id}.txt`),
-            false
-          );
-          audioPlaylistPath = apRes.path;
-          totalAudioDuration = apRes.totalDurationSec;
-        } else {
+        if (audios.length === 1 && !isAudioPlaylistMode) {
+          singleAudioFile = audios[0];
           totalAudioDuration = await getMediaDurationInSeconds(audios[0]);
+        } else {
+          // 1. Check if audioPath is a playlist ID that already has a valid pre-merged file and not in shuffle mode
+          let preMerged = null;
+          if (s.audioPath && s.audioPath.startsWith('pl_') && s.audioMode !== 'shuffle') {
+            for (const [, ch] of channelStore.channels) {
+              const pl = (ch.audioPlaylists || []).find(p => p.id === s.audioPath);
+              if (pl && pl.mergedFilePath) {
+                const fullP = normalizeFilePath(pl.mergedFilePath);
+                if (fullP && fs.existsSync(fullP)) {
+                  preMerged = fullP;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (preMerged) {
+            singleAudioFile = preMerged;
+            this._log(s, `Using pre-merged playlist audio track: ${path.basename(singleAudioFile)}`, 'info');
+          } else {
+            // 2. Auto-merge multiple audio files on-the-fly into a clean single audio track
+            const streamMergedPath = path.join(UPLOADS_CACHE_DIR, `stream_${s.id}_audio.m4a`);
+            this._log(s, `Auto-merging ${audios.length} audio file(s) into single stream track (${s.audioMode || 'sequential'})...`, 'info');
+            const mergedRes = await mergeAudioFiles(audios, streamMergedPath, s.audioMode);
+            if (mergedRes && fs.existsSync(mergedRes)) {
+              singleAudioFile = mergedRes;
+            } else {
+              singleAudioFile = audios[0];
+            }
+          }
+          totalAudioDuration = await getMediaDurationInSeconds(singleAudioFile);
         }
       }
 
@@ -980,8 +1152,8 @@ class StreamManager {
       s._stopRequested = false;
       s.logs = [];
 
-      this._log(s, `Streaming started. ${videos.length} video(s), ${audios.length} audio(s). Length: ${formatSecondsToTimemark(totalVideoDuration)}`, 'success');
-      this._streamingLoop(s, rtmpUrl, videoPlaylistPath, audioPlaylistPath, videos, audios);
+      this._log(s, `Streaming started. ${videos.length} video(s), ${audios.length} audio(s). Video Length: ${formatSecondsToTimemark(totalVideoDuration)}, Audio Length: ${formatSecondsToTimemark(totalAudioDuration)}`, 'success');
+      this._streamingLoop(s, rtmpUrl, videoPlaylistPath, singleAudioFile, videos, audios);
 
       this._broadcastStatus();
       return this._toPublic(s);
@@ -1078,12 +1250,11 @@ class StreamManager {
     s._seekOffsetSec = 0;
   }
 
-  async _streamingLoop(s, rtmpUrl, videoPlaylist, audioPlaylist, videos, audios) {
+  async _streamingLoop(s, rtmpUrl, videoPlaylist, singleAudioFile, videos, audios) {
     const myInstanceId = s.activeInstanceId;
     while (!s._stopRequested && s.activeInstanceId === myInstanceId) {
       try {
         const isVideoPlaylistMode = (videos.length > 1 || s.videoMode === 'playlist' || (s.videoPath && s.videoPath.startsWith('pl_')));
-        const isAudioPlaylistMode = (audios.length > 1 || s.audioType === 'playlist' || (s.audioPath && (s.audioPath.startsWith('pl_') || s.audioPath.includes(','))));
 
         let command = ffmpeg();
 
@@ -1104,27 +1275,22 @@ class StreamManager {
               '-loglevel', 'info',
               '-fflags', '+genpts+igndts',
               '-avoid_negative_ts', 'make_zero',
-              // '-re',
+              '-re',
               '-stream_loop', '-1'
             ]);
         }
 
-        if (audios.length > 0) {
-          if (isAudioPlaylistMode) {
-            command.input(audioPlaylist)
-              .inputOptions([
-                '-re',
-                '-f',
-                'concat',
-                '-safe',
-                '0',
-                '-stream_loop',
-                '-1'
-              ]);
-          } else {
-            command.input(audios[0])
-              .inputOptions(['-re', '-stream_loop', '-1']);
-          }
+        if (singleAudioFile && fs.existsSync(singleAudioFile)) {
+          command.input(singleAudioFile)
+            .inputOptions([
+              '-stream_loop', '-1'
+            ]);
+          command.outputOptions(['-map', '0:v:0', '-map', '1:a:0']);
+        } else if (audios && audios.length > 0) {
+          command.input(audios[0])
+            .inputOptions([
+              '-stream_loop', '-1'
+            ]);
           command.outputOptions(['-map', '0:v:0', '-map', '1:a:0']);
         } else {
           command.outputOptions(['-map', '0:v:0', '-map', '0:a:0']);
@@ -1733,14 +1899,14 @@ app.delete('/api/channels/:id/keys/:keyId', (req, res) => {
 });
 
 // Playlists API
-app.post('/api/channels/:id/playlists', (req, res) => {
-  const pl = channelStore.addPlaylist(req.params.id, req.body);
+app.post('/api/channels/:id/playlists', async (req, res) => {
+  const pl = await channelStore.addPlaylist(req.params.id, req.body);
   if (!pl) return res.status(404).json({ error: 'Channel not found' });
   res.status(201).json(pl);
 });
 
-app.put('/api/channels/:id/playlists/:playlistId', (req, res) => {
-  const pl = channelStore.updatePlaylist(req.params.id, req.params.playlistId, req.body);
+app.put('/api/channels/:id/playlists/:playlistId', async (req, res) => {
+  const pl = await channelStore.updatePlaylist(req.params.id, req.params.playlistId, req.body);
   if (!pl) return res.status(404).json({ error: 'Playlist not found' });
   res.json(pl);
 });
@@ -1898,6 +2064,11 @@ function getOrphanUploads() {
         if (a.url) referencedFiles.add(path.resolve(path.join(__dirname, a.url.replace(/^\//, ''))).toLowerCase());
       }
     }
+    if (Array.isArray(c.audioPlaylists)) {
+      for (const pl of c.audioPlaylists) {
+        if (pl.mergedFilePath) referencedFiles.add(path.resolve(normalizeFilePath(pl.mergedFilePath)).toLowerCase());
+      }
+    }
   }
 
   // Check streams
@@ -1915,7 +2086,7 @@ function getOrphanUploads() {
 
   const orphanFiles = [];
   let totalOrphanBytes = 0;
-  const targetDirs = [UPLOADS_VIDEOS_DIR, UPLOADS_AUDIOS_DIR, UPLOADS_THUMBS_DIR];
+  const targetDirs = [UPLOADS_VIDEOS_DIR, UPLOADS_AUDIOS_DIR, UPLOADS_THUMBS_DIR, UPLOADS_CACHE_DIR];
 
   for (const dir of targetDirs) {
     if (!fs.existsSync(dir)) continue;
@@ -1981,7 +2152,31 @@ function getTempCacheInfo() {
     } catch (_) { }
   }
 
-  // 2. Logs directory (.log files of stopped/idle streams)
+  // 2. Stream Audio Cache in playlist_cache
+  if (fs.existsSync(UPLOADS_CACHE_DIR)) {
+    try {
+      const files = fs.readdirSync(UPLOADS_CACHE_DIR);
+      for (const file of files) {
+        if (file === '.gitkeep') continue;
+        if (file.startsWith('stream_')) {
+          const streamMatch = file.match(/^stream_(.+)_audio\.m4a$/i);
+          const isBelongsToActiveStream = streamMatch && activeStreamIds.has(streamMatch[1]);
+          if (!isBelongsToActiveStream) {
+            const fullPath = path.join(UPLOADS_CACHE_DIR, file);
+            try {
+              const stat = fs.statSync(fullPath);
+              if (stat.isFile()) {
+                tempFiles.push({ path: fullPath, name: file, type: 'stream_audio_cache', size: stat.size });
+                totalTempBytes += stat.size;
+              }
+            } catch (_) { }
+          }
+        }
+      }
+    } catch (_) { }
+  }
+
+  // 3. Logs directory (.log files of stopped/idle streams)
   if (fs.existsSync(LOGS_DIR)) {
     try {
       const files = fs.readdirSync(LOGS_DIR);
