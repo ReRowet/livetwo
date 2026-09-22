@@ -28,6 +28,8 @@ uploads/audios/*
 !uploads/audios/.gitkeep
 uploads/thumbnails/*
 !uploads/thumbnails/.gitkeep
+uploads/playlist_cache/*
+!uploads/playlist_cache/.gitkeep
 
 # Runtime Data & Session Tokens
 data/*
